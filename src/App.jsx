@@ -3,6 +3,7 @@ import { createChart } from 'lightweight-charts';
 
 export default function App() {
   const [selectedPair, setSelectedPair] = useState('BTCUSDT');
+  const [timeframe, setTimeframe] = useState('1m');
   const [tradeAmount, setTradeAmount] = useState('0.05');
   const [leverage, setLeverage] = useState('20');
   const [tpPercent, setTpPercent] = useState('2.0');
@@ -18,7 +19,7 @@ export default function App() {
   const priceLinesRef = useRef([]);
 
   const [marketData, setMarketData] = useState({
-    BTCUSDT: { name: 'BTC / USDT', price: 64256.38, color: '#f7931a' },
+    BTCUSDT: { name: 'BTC / USDT', price: 64392.94, color: '#f7931a' },
     ETHUSDT: { name: 'ETH / USDT', price: 3480.50, color: '#627eea' },
     XAUUSD: { name: 'الذهب (XAU)', price: 2392.40, color: '#ffd700' },
     XAGUSD: { name: 'الفضة (XAG)', price: 28.90, color: '#c0c0c0' }
@@ -49,20 +50,20 @@ export default function App() {
     setOrderBook({ asks, bids });
   }, [selectedPair, currentPairObj.price]);
 
-  // تهيئة الشارت
+  // تهيئة الشارت مع دعم الفريمات
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 250,
+      height: 240,
       layout: {
         background: { color: '#05080f' },
         textColor: '#8a99ad',
       },
       grid: {
-        vertLines: { color: '#101726' },
-        horzLines: { color: '#101726' },
+        vertLines: { color: '#121c2e' },
+        horzLines: { color: '#121c2e' },
       },
       crosshair: { mode: 1 },
       rightPriceScale: { borderColor: '#1c2841' },
@@ -77,12 +78,14 @@ export default function App() {
       wickDownColor: '#f72585',
     });
 
-    const baseline = selectedPair === 'BTCUSDT' ? 64250 : selectedPair === 'ETHUSDT' ? 3480 : 2390;
-    let currTime = Math.floor(Date.now() / 1000) - 120 * 60;
+    const baseline = selectedPair === 'BTCUSDT' ? 64390 : selectedPair === 'ETHUSDT' ? 3480 : 2390;
+    const intervalSec = timeframe === '1m' ? 60 : timeframe === '5m' ? 300 : timeframe === '15m' ? 900 : 3600;
+    
+    let currTime = Math.floor(Date.now() / 1000) - 100 * intervalSec;
     let lastClose = baseline;
     
     const initialData = [];
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 100; i++) {
       const open = lastClose;
       const change = (Math.random() - 0.48) * (baseline * 0.002);
       const close = open + change;
@@ -91,7 +94,7 @@ export default function App() {
       
       initialData.push({ time: currTime, open, high, low, close });
       lastClose = close;
-      currTime += 60;
+      currTime += intervalSec;
     }
 
     candleSeries.setData(initialData);
@@ -109,9 +112,9 @@ export default function App() {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [selectedPair]);
+  }, [selectedPair, timeframe]);
 
-  // رسم الخريطة الحرارية (Heatmap Canvas Engine) خلف الشارت
+  // رسم الخريطة الحرارية الواضحة (Heatmap Canvas Engine)
   useEffect(() => {
     const canvas = heatmapCanvasRef.current;
     if (!canvas) return;
@@ -121,20 +124,20 @@ export default function App() {
 
     ctx.clearRect(0, 0, width, height);
 
-    // رسم تدرجات السيولة الحرارية (Bookmap Liquidity Nodes)
-    const cols = 40;
-    const rows = 15;
+    const cols = 25;
+    const rows = 12;
     const colWidth = width / cols;
     const rowHeight = height / rows;
 
     for (let x = 0; x < cols; x++) {
       for (let y = 0; y < rows; y++) {
-        // توليد كثافة سيولة وهمية متغيرة نابضة بالحياة
-        const intensity = Math.sin(x * 0.3 + Date.now() * 0.002) * Math.cos(y * 0.4);
-        if (intensity > 0.3) {
+        // توليد خطوط وتجمعات سيولة بارزة وواضحة
+        const wave = Math.sin((x + Date.now() * 0.001) * 0.5) * Math.cos(y * 0.5);
+        if (wave > 0.15) {
+          const alpha = Math.min(wave * 0.55, 0.7);
           ctx.fillStyle = y < rows / 2 
-            ? `rgba(247, 37, 133, ${intensity * 0.35})` // سيولة عروض البيع (مجنتا/أحمر)
-            : `rgba(0, 245, 212, ${intensity * 0.35})`; // سيولة طلبات الشراء (تركواز/أخضر)
+            ? `rgba(247, 37, 133, ${alpha})` // عروض البيع (مجنتا ساطعة)
+            : `rgba(0, 245, 212, ${alpha})`; // طلبات الشراء (تركواز ساطع)
           ctx.fillRect(x * colWidth, y * rowHeight, colWidth - 1, rowHeight - 1);
         }
       }
@@ -153,8 +156,9 @@ export default function App() {
 
         if (seriesRef.current) {
           const currentTime = Math.floor(Date.now() / 1000);
+          const intervalSec = timeframe === '1m' ? 60 : timeframe === '5m' ? 300 : timeframe === '15m' ? 900 : 3600;
           seriesRef.current.update({
-            time: currentTime - (currentTime % 60),
+            time: currentTime - (currentTime % intervalSec),
             open: newPrice - 10,
             high: newPrice + 12,
             low: newPrice - 15,
@@ -187,7 +191,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [selectedPair, marketData, currentPairObj.price]);
+  }, [selectedPair, timeframe, marketData, currentPairObj.price]);
 
   // ربط الأهداف بالخطوط على الشارت
   useEffect(() => {
@@ -261,7 +265,7 @@ export default function App() {
     };
 
     setPositions([newPos, ...positions]);
-    setStatusMsg(`🚀 تم تنفيذ الصفقة بنجاح عبر الخريطة الحرارية المؤسسية!`);
+    setStatusMsg(`🚀 تم تنفيذ الصفقة بنجاح على فريم ${timeframe}!`);
     setTimeout(() => setStatusMsg(''), 4000);
   };
 
@@ -314,6 +318,23 @@ export default function App() {
         ))}
       </div>
 
+      {/* شريط الفريمات الزمنية (Timeframes) */}
+      <div style={styles.timeframeBar}>
+        {['1m', '5m', '15m', '1H'].map(tf => (
+          <button
+            key={tf}
+            style={{
+              ...styles.tfBtn,
+              backgroundColor: timeframe === tf ? '#4cc9f0' : '#0b111e',
+              color: timeframe === tf ? '#05080f' : '#8a99ad'
+            }}
+            onClick={() => setTimeframe(tf)}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
+
       {/* لوحة الرصيد */}
       <div style={styles.headerCard}>
         <div>
@@ -321,24 +342,23 @@ export default function App() {
           <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#00f5d4' }}>${balance.toLocaleString()}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={styles.subText}>محرك السيولة الحرارية</div>
-          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#f72585' }}>Bookmap Heatmap Active 🔥</div>
+          <div style={styles.subText}>خريطة السيولة والفريمات</div>
+          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#f72585' }}>Heatmap & TF Active 🔥</div>
         </div>
       </div>
 
-      {/* الشارت المدمج مع الخريطة الحرارية (Heatmap Overlay) */}
+      {/* الشارت مع الخريطة الحرارية المحدثة */}
       <div style={styles.chartWrapper}>
         <div style={styles.chartHeader}>
-          <span>🔥 Bookmap Heatmap & Chart ({currentPairObj.name})</span>
+          <span>🔥 Bookmap Heatmap ({currentPairObj.name} - {timeframe})</span>
           <span style={{ color: '#00f5d4' }}>${currentPairObj.price}</span>
         </div>
         <div style={{ position: 'relative', width: '100%' }}>
-          {/* طبقة الكانفاس الحرارية تحت الشارت مباشرة */}
           <canvas 
             ref={heatmapCanvasRef} 
             width={380} 
-            height={250} 
-            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1, opacity: 0.85 }} 
+            height={240} 
+            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }} 
           />
           <div ref={chartContainerRef} style={{ width: '100%', position: 'relative', zIndex: 2 }} />
         </div>
@@ -466,7 +486,7 @@ export default function App() {
       {statusMsg && <div style={styles.statusBanner}>{statusMsg}</div>}
 
       <div style={styles.footer}>
-        Bookmap Heatmap Quant Engine | Owner ID: 966607076
+        Advanced Bookmap & Timeframes Engine | Owner ID: 966607076
       </div>
 
     </div>
@@ -477,6 +497,8 @@ const styles = {
   container: { backgroundColor: '#05080f', color: '#f8f9fa', minHeight: '100vh', padding: '10px', fontFamily: 'system-ui, sans-serif' },
   pairsBar: { display: 'flex', gap: '6px', overflowX: 'auto', marginBottom: '8px', paddingBottom: '4px' },
   pairBtn: { flex: '0 0 auto', padding: '6px 10px', border: '1px solid', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', minWidth: '80px' },
+  timeframeBar: { display: 'flex', gap: '6px', marginBottom: '8px', backgroundColor: '#0b111e', padding: '6px', borderRadius: '8px', border: '1px solid #1c2841' },
+  tfBtn: { flex: 1, padding: '4px', border: '1px solid #1c2841', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', textAlign: 'center' },
   headerCard: { display: 'flex', justifyContent: 'space-between', backgroundColor: '#0b111e', border: '1px solid #1c2841', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
   subText: { fontSize: '9px', color: '#8a99ad' },
   chartWrapper: { backgroundColor: '#0b111e', border: '1px solid #1c2841', borderRadius: '10px', padding: '4px', marginBottom: '8px', overflow: 'hidden' },
@@ -494,7 +516,7 @@ const styles = {
   card: { backgroundColor: '#0b111e', border: '1px solid #1c2841', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
   inputSmall: { width: '100%', padding: '6px', backgroundColor: '#05080f', border: '1px solid #1c2841', borderRadius: '4px', color: '#fff', fontSize: '11px', textAlign: 'center', boxSizing: 'border-box', marginTop: '2px' },
   selectInput: { width: '100%', padding: '6px', backgroundColor: '#05080f', border: '1px solid #1c2841', borderRadius: '4px', color: '#fff', fontSize: '11px', textAlign: 'center', boxSizing: 'border-box', marginTop: '2px' },
-  tradeBtn: { flex: '1', padding: '10px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
+  tradeBtn: { flex: 1, padding: '10px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
   closeBtnLarge: { backgroundColor: '#f72585', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold', alignSelf: 'center' },
   statusBanner: { backgroundColor: '#4cc9f0', color: '#05080f', padding: '6px', borderRadius: '6px', fontSize: '10px', textAlign: 'center', fontWeight: 'bold', marginBottom: '8px' },
   footer: { textAlign: 'center', color: '#3a4b6c', fontSize: '9px', marginTop: '8px' }
