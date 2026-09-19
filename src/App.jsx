@@ -29,6 +29,7 @@ export default function App() {
   const chartInstanceRef = useRef(null);
   const seriesRef = useRef(null);
   const lastCandleRef = useRef(null);
+  const isDataReadyRef = useRef(false); // 👈 مفتاح أمان لمنع تجمد الشارت
 
   const [marketData, setMarketData] = useState({
     BTCUSD: { name: 'BTC / USD', symbolApi: 'BTCUSDT', price: 0, color: '#f7931a' },
@@ -47,7 +48,7 @@ export default function App() {
     }
   }, []);
 
-  // 3. جلب الأسعار الأولية لكافة الأزواج لمنع ظهور (...$)
+  // 3. جلب الأسعار الأولية لكافة الأزواج
   useEffect(() => {
     const fetchAllInitialPrices = async () => {
       try {
@@ -86,7 +87,7 @@ export default function App() {
     localStorage.setItem('bot_positions', JSON.stringify(positions));
   }, [positions]);
 
-  // 5. إنشاء الشارت
+  // 5. إنشاء الشارت مع إعدادات الضبط الآلي للمحور Vertical Scale
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -102,7 +103,10 @@ export default function App() {
         horzLines: { color: '#121c2e' },
       },
       crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: '#1c2841' },
+      rightPriceScale: { 
+        borderColor: '#1c2841',
+        autoScale: true // 👈 مطابقة المقياس مع السعر تلقائياً
+      },
       timeScale: { 
         borderColor: '#1c2841', 
         timeVisible: true, 
@@ -134,17 +138,22 @@ export default function App() {
     };
   }, []);
 
-  // 6. جلب الشموع التاريخية عند تغيير الزوج أو الفريم
+  // 6. جلب الشموع التاريخية وإعادة تعيين المقاييس آمنة تماماً
   useEffect(() => {
     if (!seriesRef.current) return;
 
+    let isMounted = true;
+    isDataReadyRef.current = false; // تجميد التحديثات المباشرة مؤقتاً لحين انتهاء التحميل
+
     const fetchHistoricalData = async () => {
       try {
+        seriesRef.current.setData([]); // تفريغ القديم
+
         const symbol = currentPairObj.symbolApi;
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=100`);
         const rawData = await res.json();
 
-        if (Array.isArray(rawData)) {
+        if (isMounted && Array.isArray(rawData) && rawData.length > 0) {
           const formattedData = rawData.map(d => ({
             time: Math.floor(d[0] / 1000),
             open: parseFloat(d[1]),
@@ -155,6 +164,11 @@ export default function App() {
 
           seriesRef.current.setData(formattedData);
           lastCandleRef.current = formattedData[formattedData.length - 1];
+          isDataReadyRef.current = true; // 🔓 إعطاء الإذن لـ WebSocket بضخ التحديثات
+
+          if (chartInstanceRef.current) {
+            chartInstanceRef.current.timeScale().fitContent(); // إعادة محاذاة المقياس
+          }
         }
       } catch (err) {
         console.error("فشل تحميل البيانات التاريخية:", err);
@@ -162,17 +176,25 @@ export default function App() {
     };
 
     fetchHistoricalData();
+
+    return () => {
+      isMounted = false;
+      isDataReadyRef.current = false;
+    };
   }, [selectedPair, timeframe]);
 
-  // 7. البث المباشر عبر WebSocket للشارت والسعر
+  // 7. البث المباشر المبرمج بحماية من التجمد والـ Out of Order Time
   useEffect(() => {
     if (!currentPairObj?.symbolApi) return;
 
+    let isSubscribed = true;
     const symbol = currentPairObj.symbolApi.toLowerCase();
     const wsUrl = `wss://stream.binance.com:9443/ws/${symbol}@kline_${timeframe}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {
+      if (!isSubscribed) return;
+
       try {
         const data = JSON.parse(event.data);
         if (data && data.k) {
@@ -185,9 +207,12 @@ export default function App() {
             close: parseFloat(kline.c),
           };
 
-          if (seriesRef.current) {
-            seriesRef.current.update(liveCandle);
-            lastCandleRef.current = liveCandle;
+          // 🟢 التحديث فقط عند التأكد من تجهيز الشموع السابقة لمنع تجمد المكتبة
+          if (isDataReadyRef.current && seriesRef.current && lastCandleRef.current) {
+            if (liveCandle.time >= lastCandleRef.current.time) {
+              seriesRef.current.update(liveCandle);
+              lastCandleRef.current = liveCandle;
+            }
           }
 
           const newPrice = parseFloat(kline.c);
@@ -204,9 +229,8 @@ export default function App() {
       }
     };
 
-    ws.onerror = (err) => console.error("WebSocket Error:", err);
-
     return () => {
+      isSubscribed = false; // تجاهل أية رسائل متأخرة للزوج السابق
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
@@ -532,9 +556,9 @@ const styles = {
     color: '#f8f9fa', 
     minHeight: '100vh', 
     maxHeight: '100vh',
-    overflowY: 'auto', // 👈 إصلاح التمرير الداخلي في تليجرام
+    overflowY: 'auto',
     padding: '10px', 
-    paddingBottom: '40px', // 👈 مساحة أمان لمنع القطع السفلي
+    paddingBottom: '40px',
     boxSizing: 'border-box',
     fontFamily: 'system-ui, -apple-system, sans-serif' 
   },
