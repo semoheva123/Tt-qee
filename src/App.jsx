@@ -14,7 +14,7 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [autoTradeAI, setAutoTradeAI] = useState(false);
 
-  // 1. استرجاع الرصيد والصفقات من localStorage لمنع فقدان البيانات عند الإغلاق
+  // 1. استرجاع الرصيد والصفقات من localStorage
   const [balance, setBalance] = useState(() => {
     const savedBalance = localStorage.getItem('bot_balance');
     return savedBalance !== null ? parseFloat(savedBalance) : 10000.00;
@@ -39,7 +39,45 @@ export default function App() {
 
   const currentPairObj = marketData[selectedPair];
 
-  // 2. الحفظ التلقائي للبيانات عند أي تغيير
+  // 2. تهيئة وتوسعة النافذة فوراً داخل Telegram Mini App
+  useEffect(() => {
+    if (window.Telegram?.WebApp) {
+      window.Telegram.WebApp.ready();
+      window.Telegram.WebApp.expand();
+    }
+  }, []);
+
+  // 3. جلب الأسعار الأولية لكافة الأزواج لمنع ظهور (...$)
+  useEffect(() => {
+    const fetchAllInitialPrices = async () => {
+      try {
+        const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+        const data = await res.json();
+        
+        const priceMap = {};
+        data.forEach(item => {
+          priceMap[item.symbol] = parseFloat(item.price);
+        });
+
+        setMarketData(prev => {
+          const updated = { ...prev };
+          Object.keys(updated).forEach(key => {
+            const sym = updated[key].symbolApi;
+            if (priceMap[sym]) {
+              updated[key].price = priceMap[sym];
+            }
+          });
+          return updated;
+        });
+      } catch (err) {
+        console.error("خطأ في جلب الأسعار الأولية:", err);
+      }
+    };
+
+    fetchAllInitialPrices();
+  }, []);
+
+  // 4. الحفظ التلقائي للبيانات
   useEffect(() => {
     localStorage.setItem('bot_balance', balance.toString());
   }, [balance]);
@@ -48,13 +86,13 @@ export default function App() {
     localStorage.setItem('bot_positions', JSON.stringify(positions));
   }, [positions]);
 
-  // 3. إنشاء الشارت مرة واحدة فقط
+  // 5. إنشاء الشارت
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 280,
+      height: 260,
       layout: {
         background: { color: '#05080f' },
         textColor: '#8a99ad',
@@ -65,7 +103,11 @@ export default function App() {
       },
       crosshair: { mode: 1 },
       rightPriceScale: { borderColor: '#1c2841' },
-      timeScale: { borderColor: '#1c2841', timeVisible: true, secondsVisible: false },
+      timeScale: { 
+        borderColor: '#1c2841', 
+        timeVisible: true, 
+        secondsVisible: false 
+      },
     });
 
     const candleSeries = chart.addCandlestickSeries({
@@ -92,7 +134,7 @@ export default function App() {
     };
   }, []);
 
-  // 4. جلب الشموع التاريخية عند تغيير الزوج أو الفريم
+  // 6. جلب الشموع التاريخية عند تغيير الزوج أو الفريم
   useEffect(() => {
     if (!seriesRef.current) return;
 
@@ -122,7 +164,7 @@ export default function App() {
     fetchHistoricalData();
   }, [selectedPair, timeframe]);
 
-  // 5. البث المباشر عبر WebSocket (يمنع التجمد ويحدث الشارت والسعر لحظياً)
+  // 7. البث المباشر عبر WebSocket للشارت والسعر
   useEffect(() => {
     if (!currentPairObj?.symbolApi) return;
 
@@ -171,7 +213,7 @@ export default function App() {
     };
   }, [selectedPair, timeframe]);
 
-  // 6. التحقق الآمن من الوقف والهدف (SL/TP) وتحديث PnL
+  // 8. متابعة الأهداف ووقف الخسارة أوتوماتيكياً (SL/TP)
   useEffect(() => {
     const currentP = currentPairObj?.price;
     if (!currentP || positions.length === 0) return;
@@ -200,14 +242,14 @@ export default function App() {
     if (closedIds.length > 0) {
       setBalance(prev => Number((prev + totalClosedPnl).toFixed(2)));
       setPositions(prev => prev.filter(p => !closedIds.includes(p.id)));
-      setStatusMsg(`✅ تم إغلاق ${closedIds.length} صفقة أوتوماتيكياً (SL/TP)`);
+      setStatusMsg(`✅ تم إغلاق ${closedIds.length} صفقة تلقائياً (SL/TP)`);
       setTimeout(() => setStatusMsg(''), 3000);
     } else {
       setPositions(updatedPositions);
     }
   }, [marketData[selectedPair]?.price]);
 
-  // 7. محرك تحليل الذكاء الاصطناعي (AI Analysis Engine)
+  // 9. تحليل الذكاء الاصطناعي
   const handleRunAiAnalysis = async () => {
     const currentP = currentPairObj?.price;
     if (!currentP) return;
@@ -215,16 +257,15 @@ export default function App() {
     setIsAnalyzing(true);
     setStatusMsg('🤖 الذكاء الاصطناعي يقوم بتحليل الشمعة والمؤشرات...');
 
-    // محاكاة تحليل مستند إلى اتجاه السعر والفريم الزمني
     setTimeout(() => {
       const isUp = Math.random() > 0.45;
       const action = isUp ? 'BUY' : 'SELL';
-      const slOffset = currentP * 0.008; // وقف 0.8%
-      const tpOffset = currentP * 0.016; // هدف 1.6%
+      const slOffset = currentP * 0.008;
+      const tpOffset = currentP * 0.016;
 
       const result = {
         action,
-        confidence: Math.floor(Math.random() * 20) + 78, // 78% - 98%
+        confidence: Math.floor(Math.random() * 20) + 78,
         entryPrice: currentP,
         stopLoss: Number((action === 'BUY' ? currentP - slOffset : currentP + slOffset).toFixed(2)),
         takeProfit: Number((action === 'BUY' ? currentP + tpOffset : currentP - tpOffset).toFixed(2)),
@@ -235,9 +276,8 @@ export default function App() {
 
       setAiAnalysis(result);
       setIsAnalyzing(false);
-      setStatusMsg(`💡 تم توليد توصية الذكاء الاصطناعي: ${result.action}`);
+      setStatusMsg(`💡 توصية الذكاء الاصطناعي: ${result.action}`);
 
-      // التنفيذ الآلي إذا كان التداول التلقائي مفعلاً
       if (autoTradeAI) {
         handleTrade(result.action === 'BUY' ? 'LONG' : 'SHORT', {
           stopLoss: result.stopLoss,
@@ -247,7 +287,7 @@ export default function App() {
     }, 1200);
   };
 
-  // 8. عمليات التداول والتحكم
+  // 10. تنفيذ وتنسيق الصفقات
   const handleTrade = (side, customParams = {}) => {
     const entry = currentPairObj.price;
     if (!entry) return;
@@ -296,7 +336,7 @@ export default function App() {
 
   return (
     <div style={styles.container}>
-      {/* اختيار نمط السوق */}
+      {/* نمط السوق */}
       <div style={styles.marketTypeBar}>
         <button
           style={{ ...styles.marketTypeBtn, backgroundColor: marketType === 'SPOT' ? '#00f5d4' : '#0b111e', color: marketType === 'SPOT' ? '#05080f' : '#8a99ad' }}
@@ -321,12 +361,14 @@ export default function App() {
             onClick={() => setSelectedPair(key)}
           >
             <div style={{ fontSize: '11px', fontWeight: 'bold', color: item.color }}>{item.name}</div>
-            <div style={{ fontSize: '10px', color: '#fff' }}>${item.price ? item.price.toLocaleString() : '...'}</div>
+            <div style={{ fontSize: '10px', color: '#fff' }}>
+              {item.price ? `$${item.price.toLocaleString()}` : '...$'}
+            </div>
           </button>
         ))}
       </div>
 
-      {/* الفريمات الزمنيّة */}
+      {/* الفريم الزمني */}
       <div style={styles.timeframeBar}>
         {['1m', '5m', '15m', '1h'].map(tf => (
           <button
@@ -339,27 +381,25 @@ export default function App() {
         ))}
       </div>
 
-      {/* ملخص المحفظة */}
+      {/* الرصيد */}
       <div style={styles.headerCard}>
         <div>
           <div style={styles.subText}>الرصيد المتاح (محفوظ)</div>
           <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#00f5d4' }}>${balance.toLocaleString()} USD</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <button style={styles.resetBtn} onClick={handleResetAccount}>🔄 إعادة ضبط</button>
-        </div>
+        <button style={styles.resetBtn} onClick={handleResetAccount}>🔄 إعادة ضبط</button>
       </div>
 
       {/* الشارت المباشر */}
       <div style={styles.chartWrapper}>
         <div style={styles.chartHeader}>
-          <span>📊 شارت حقيقي - WebSocket ({currentPairObj.name})</span>
+          <span>📊 WebSocket ({currentPairObj.name})</span>
           <span style={{ color: '#00f5d4' }}>${currentPairObj.price} USD</span>
         </div>
-        <div ref={chartContainerRef} style={{ width: '100%', height: '280px' }} />
+        <div ref={chartContainerRef} style={{ width: '100%', height: '260px' }} />
       </div>
 
-      {/* 🤖 لوحة محرك الذكاء الاصطناعي (AI Signal & Auto-Trade Engine) */}
+      {/* لوحة الذكاء الاصطناعي */}
       <div style={styles.aiCard}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#7209b7' }}>🧠 محلل الذكاء الاصطناعي (Groq Engine)</span>
@@ -378,7 +418,7 @@ export default function App() {
           onClick={handleRunAiAnalysis}
           disabled={isAnalyzing}
         >
-          {isAnalyzing ? '⏳ جاري تحليل الحركة والمؤشرات...' : '⚡ تحليل الشمعة الحالية وإصدار توصية'}
+          {isAnalyzing ? '⏳ جاري تحليل الشمعة والمؤشرات...' : '⚡ تحليل الشمعة الحالية وإصدار توصية'}
         </button>
 
         {aiAnalysis && (
@@ -480,14 +520,24 @@ export default function App() {
       {statusMsg && <div style={styles.statusBanner}>{statusMsg}</div>}
 
       <div style={styles.footer}>
-        WebSocket Realtime Engine | AI Trade Connected
+        Trad_Kird Mini App Engine | Connected
       </div>
     </div>
   );
 }
 
 const styles = {
-  container: { backgroundColor: '#05080f', color: '#f8f9fa', minHeight: '100vh', padding: '10px', fontFamily: 'system-ui, sans-serif' },
+  container: { 
+    backgroundColor: '#05080f', 
+    color: '#f8f9fa', 
+    minHeight: '100vh', 
+    maxHeight: '100vh',
+    overflowY: 'auto', // 👈 إصلاح التمرير الداخلي في تليجرام
+    padding: '10px', 
+    paddingBottom: '40px', // 👈 مساحة أمان لمنع القطع السفلي
+    boxSizing: 'border-box',
+    fontFamily: 'system-ui, -apple-system, sans-serif' 
+  },
   marketTypeBar: { display: 'flex', gap: '6px', marginBottom: '8px' },
   marketTypeBtn: { flex: 1, padding: '8px', border: '1px solid #1c2841', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', textAlign: 'center' },
   pairsBar: { display: 'flex', gap: '6px', overflowX: 'auto', marginBottom: '8px', paddingBottom: '4px' },
