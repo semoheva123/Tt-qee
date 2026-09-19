@@ -10,17 +10,16 @@ export default function App() {
   const [positions, setPositions] = useState([]);
   const [balance, setBalance] = useState(10000.00);
 
-  // قاعدة بيانات الأسعار الحية والأصول
   const [marketData, setMarketData] = useState({
-    BTCUSDT: { name: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSDT', price: 64250.00, change: '+2.4%', vpin: 0.42, whaleAlert: 'شراء مكثف من الحيتان عند الدعم', color: '#f7931a' },
-    ETHUSDT: { name: 'ETH / USDT', tvSymbol: 'BINANCE:ETHUSDT', price: 3480.50, change: '+1.8%', vpin: 0.35, whaleAlert: 'توازن في دفتر الطلبات المؤسسي', color: '#627eea' },
-    XAUUSD: { name: 'الذهب (XAU)', tvSymbol: 'OANDA:XAUUSD', price: 2392.40, change: '+0.9%', vpin: 0.58, whaleAlert: 'تجميع قوي للملاذ الآمن', color: '#ffd700' },
-    XAGUSD: { name: 'الفضة (XAG)', tvSymbol: 'OANDA:XAGUSD', price: 28.90, change: '-0.4%', vpin: 0.49, whaleAlert: 'سيولة متذبذبة قصيرة الأجل', color: '#c0c0c0' }
+    BTCUSDT: { name: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSDT', price: 64250.00, change: '+2.4%', color: '#f7931a' },
+    ETHUSDT: { name: 'ETH / USDT', tvSymbol: 'BINANCE:ETHUSDT', price: 3480.50, change: '+1.8%', color: '#627eea' },
+    XAUUSD: { name: 'الذهب (XAU)', tvSymbol: 'OANDA:XAUUSD', price: 2392.40, change: '+0.9%', color: '#ffd700' },
+    XAGUSD: { name: 'الفضة (XAG)', tvSymbol: 'OANDA:XAGUSD', price: 28.90, change: '-0.4%', color: '#c0c0c0' }
   });
 
   const currentPairObj = marketData[selectedPair];
 
-  // محاكاة التذبذب الحي للأسعار والأرباح للوصول لتجربة واقعية مذهلة
+  // محاكاة حركة الأسعار المباشرة وتحديث أرباح الصفقات المرئية
   useEffect(() => {
     const interval = setInterval(() => {
       setMarketData(prev => {
@@ -32,7 +31,6 @@ export default function App() {
         return updated;
       });
 
-      // تحديث أرباح الصفقات المفتوحة تلقائياً
       setPositions(prevPos => 
         prevPos.map(pos => {
           const currentP = marketData[pos.symbolKey]?.price || pos.entryPrice;
@@ -45,14 +43,6 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [marketData]);
-
-  useEffect(() => {
-    if (window.Telegram?.WebApp) {
-      const tg = window.Telegram.WebApp;
-      tg.ready();
-      tg.expand();
-    }
-  }, []);
 
   const handleTrade = (side) => {
     if (window.Telegram?.WebApp?.HapticFeedback) {
@@ -72,8 +62,7 @@ export default function App() {
     };
 
     setPositions([newPos, ...positions]);
-    setStatusMsg(`🚀 تم تنفيذ أمر ${side} بنجاح على ${currentPairObj.name}!`);
-    setActiveTab('positions');
+    setStatusMsg(`🚀 تم إسقاط صفقة ${side} على الشارت والمنظومة بنجاح!`);
     setTimeout(() => setStatusMsg(''), 4000);
   };
 
@@ -83,14 +72,17 @@ export default function App() {
     }
     setBalance(prev => Number((prev + pnl).toFixed(2)));
     setPositions(positions.filter(p => p.id !== id));
-    setStatusMsg(`✅ تم إغلاق الصفقة بنجاح. صافي النتيجة: ${pnl >= 0 ? '+' : ''}$${pnl}`);
+    setStatusMsg(`✅ تم إغلاق الصفقة بنجاح. النتيجة: ${pnl >= 0 ? '+' : ''}$${pnl}`);
     setTimeout(() => setStatusMsg(''), 4000);
   };
+
+  // تصفية الصفقات الخاصة بالأصل الحالي فقط لعرضها تحت شارت هدا الأصل
+  const currentPairPositions = positions.filter(p => p.symbolKey === selectedPair);
 
   return (
     <div style={styles.container}>
       
-      {/* 1. شريط الأزواج الذكي المتقدم */}
+      {/* شريط الأزواج */}
       <div style={styles.pairsBar}>
         {Object.entries(marketData).map(([key, item]) => (
           <button
@@ -104,162 +96,93 @@ export default function App() {
           >
             <div style={{ fontSize: '11px', fontWeight: 'bold', color: item.color }}>{item.name}</div>
             <div style={{ fontSize: '10px', color: '#fff' }}>${item.price.toLocaleString()}</div>
-            <div style={{ fontSize: '9px', color: item.change.startsWith('+') ? '#10b981' : '#ef476f' }}>{item.change}</div>
           </button>
         ))}
       </div>
 
-      {/* 2. الشريط المالي العلوي ورأس المال */}
+      {/* شريط المحفظة */}
       <div style={styles.headerCard}>
         <div>
-          <div style={styles.subText}>حساب التداول المؤسسي</div>
-          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#00b4d8' }}>
-            {isDemo ? `$${balance.toLocaleString()}` : 'ربط مباشر (API Connected)'}
-          </div>
+          <div style={styles.subText}>رصيد الحساب التجريبي</div>
+          <div style={{ fontSize: '17px', fontWeight: 'bold', color: '#00b4d8' }}>${balance.toLocaleString()}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={styles.subText}>إجمالي الصفقات المفتوحة</div>
-          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#ffb703' }}>
-            {positions.length} صفقات نشطة
-          </div>
+          <div style={styles.subText}>العقود النشطة للشارت الحالي</div>
+          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#ffb703' }}>{currentPairPositions.length} صفقات مرئية</div>
         </div>
       </div>
 
-      {/* 3. تبديل نمط التداول (تجريبي / حقيقي) */}
-      <div style={styles.modeBar}>
-        <button 
-          style={{ ...styles.modeBtn, backgroundColor: isDemo ? '#10b981' : '#101728', color: isDemo ? '#fff' : '#8d99ae' }}
-          onClick={() => setIsDemo(true)}
-        >
-          🟢 محاكاة مؤسسية ($10,000)
-        </button>
-        <button 
-          style={{ ...styles.modeBtn, backgroundColor: !isDemo ? '#ef476f' : '#101728', color: !isDemo ? '#fff' : '#8d99ae' }}
-          onClick={() => setIsDemo(false)}
-        >
-          🔴 التداول الحي (API)
-        </button>
+      {/* الفواصل الزمنية */}
+      <div style={styles.tfBar}>
+        {['1', '5', '15', '60', 'D'].map(tf => (
+          <button 
+            key={tf} 
+            style={{ ...styles.tfBtn, backgroundColor: timeframe === tf ? '#00b4d8' : '#162038', color: timeframe === tf ? '#0b132b' : '#fff' }}
+            onClick={() => setTimeframe(tf)}
+          >
+            {tf === '60' ? '1H' : tf === 'D' ? '1D' : `${tf}m`}
+          </button>
+        ))}
       </div>
 
-      {/* 4. قائمة التبويبات الرئيسية */}
-      <div style={styles.tabContainer}>
-        <button style={activeTab === 'terminal' ? styles.activeTab : styles.tab} onClick={() => setActiveTab('terminal')}>📊 الشارت والتحليل</button>
-        <button style={activeTab === 'positions' ? styles.activeTab : styles.tab} onClick={() => setActiveTab('positions')}>💼 الصفقات ({positions.length})</button>
-        <button style={activeTab === 'analytics' ? styles.activeTab : styles.tab} onClick={() => setActiveTab('analytics')}>⚡ تدفق السيولة</button>
-        <button style={activeTab === 'settings' ? styles.activeTab : styles.tab} onClick={() => setActiveTab('settings')}>⚙️ الإعدادات</button>
+      {/* الشارت الحي */}
+      <div style={styles.chartWrapper}>
+        <iframe
+          key={`${currentPairObj.tvSymbol}-${timeframe}`}
+          src={`https://s.tradingview.com/widgetembed/?symbol=${currentPairObj.tvSymbol}&interval=${timeframe}&hidetoptoolbar=0&symboledit=1&saveimage=1&toolbarbg=0b132b&studies=[]&theme=dark&style=1&timezone=Etc/UTC`}
+          style={{ width: '100%', height: '300px', border: 'none', borderRadius: '8px' }}
+          title="TradingView Chart"
+        />
+      </div>
+
+      {/* 🌟 الإضافة الجذرية: لوحة العرض المرئي المباشر للصفقات على الشارت */}
+      <div style={styles.liveChartOverlayCard}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#00b4d8' }}>🎯 الصفقات المفتوحة على شارت {currentPairObj.name}</span>
+          <span style={{ fontSize: '10px', color: '#8d99ae' }}>السعر الحالي: ${currentPairObj.price}</span>
+        </div>
+
+        {currentPairPositions.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#52606d', fontSize: '11px', padding: '12px', border: '1px dashed #1c2541', borderRadius: '6px' }}>
+            لا توجد صفقات مفتوحة لهذا الأصل. انقر شراء أو بيع لترفق الصفقة فوراً هنا.
+          </div>
+        ) : (
+          currentPairPositions.map(pos => (
+            <div key={pos.id} style={{ ...styles.visualPositionRow, borderRight: `4px solid ${pos.side === 'LONG' ? '#10b981' : '#ef476f'}` }}>
+              <div>
+                <span style={{ fontWeight: 'bold', color: pos.side === 'LONG' ? '#10b981' : '#ef476f', fontSize: '11px' }}>
+                  {pos.side} ({pos.qty})
+                </span>
+                <div style={{ fontSize: '10px', color: '#8d99ae' }}>سعر الدخول: ${pos.entryPrice}</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '11px', fontWeight: 'bold', color: pos.pnl >= 0 ? '#10b981' : '#ef476f' }}>
+                  {pos.pnl >= 0 ? '+' : ''}${pos.pnl}
+                </div>
+                <div style={{ fontSize: '9px', color: '#ffb703' }}>الربح اللحظي</div>
+              </div>
+              <button style={styles.overlayCloseBtn} onClick={() => handleClosePosition(pos.id, pos.pnl)}>إغلاق</button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* لوحة التنفيذ السريع */}
+      <div style={styles.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <span style={{ fontSize: '11px', color: '#8d99ae' }}>حجم العقود</span>
+          <input type="number" step="0.01" style={styles.inputSmall} value={tradeAmount} onChange={(e) => setTradeAmount(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+          <button style={{ ...styles.tradeBtn, backgroundColor: '#10b981' }} onClick={() => handleTrade('LONG')}>شراء (LONG 🟢)</button>
+          <button style={{ ...styles.tradeBtn, backgroundColor: '#ef476f' }} onClick={() => handleTrade('SHORT')}>بيع (SHORT 🔴)</button>
+        </div>
       </div>
 
       {statusMsg && <div style={styles.statusBanner}>{statusMsg}</div>}
 
-      {/* --- التبويب الأول: الشارت الحي والتحفيذ الفوري --- */}
-      {activeTab === 'terminal' && (
-        <>
-          {/* شريط اختيار الفاصل الزمني للشارت */}
-          <div style={styles.tfBar}>
-            {['1', '5', '15', '60', 'D'].map(tf => (
-              <button 
-                key={tf} 
-                style={{ ...styles.tfBtn, backgroundColor: timeframe === tf ? '#00b4d8' : '#162038', color: timeframe === tf ? '#0b132b' : '#fff' }}
-                onClick={() => setTimeframe(tf)}
-              >
-                {tf === '60' ? '1H' : tf === 'D' ? '1D' : `${tf}m`}
-              </button>
-            ))}
-          </div>
-
-          {/* شارت TradingView الحي */}
-          <div style={styles.chartWrapper}>
-            <iframe
-              key={`${currentPairObj.tvSymbol}-${timeframe}`}
-              src={`https://s.tradingview.com/widgetembed/?symbol=${currentPairObj.tvSymbol}&interval=${timeframe}&hidetoptoolbar=0&symboledit=1&saveimage=1&toolbarbg=0b132b&studies=[]&theme=dark&style=1&timezone=Etc/UTC`}
-              style={{ width: '100%', height: '320px', border: 'none', borderRadius: '8px' }}
-              title="Advanced TradingView Chart"
-            />
-          </div>
-
-          {/* لوحة التنفيذ السريع */}
-          <div style={styles.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#00b4d8' }}>تنفيذ أمر مؤسسي فوري ({currentPairObj.name})</span>
-              <span style={{ fontSize: '11px', color: '#10b981' }}>السعر الحالي: ${currentPairObj.price.toLocaleString()}</span>
-            </div>
-            
-            <div style={{ marginBottom: '10px' }}>
-              <span style={{ fontSize: '10px', color: '#8d99ae' }}>حجم العقود / الكمية</span>
-              <input type="number" step="0.01" style={styles.input} value={tradeAmount} onChange={(e) => setTradeAmount(e.target.value)} />
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button style={{ ...styles.tradeBtn, backgroundColor: '#10b981' }} onClick={() => handleTrade('LONG')}>شراء صاعد (LONG 🟢)</button>
-              <button style={{ ...styles.tradeBtn, backgroundColor: '#ef476f' }} onClick={() => handleTrade('SHORT')}>بيع هابط (SHORT 🔴)</button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* --- التبويب الثاني: الصفقات النشطة وحساب الأرباح لحظياً --- */}
-      {activeTab === 'positions' && (
-        <div style={styles.card}>
-          <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: '#fff' }}>سجل الصفقات النشطة وإدارة المخاطر</div>
-          {positions.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#8d99ae', padding: '30px' }}>لا توجد صفقات مفتوحة حالياً. انتقل إلى قسم الشارت وابدأ التداول.</div>
-          ) : (
-            positions.map((pos) => (
-              <div key={pos.id} style={styles.posCard}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ fontWeight: 'bold', color: pos.side === 'LONG' ? '#10b981' : '#ef476f' }}>
-                    {pos.symbolName} ({pos.side})
-                  </span>
-                  <span style={{ fontSize: '11px', backgroundColor: '#0b132b', padding: '2px 6px', borderRadius: '4px', color: '#ffb703' }}>{pos.type}</span>
-                </div>
-                <div style={{ fontSize: '11px', color: '#8d99ae', marginBottom: '8px' }}>
-                  دخول: ${pos.entryPrice} \vert{} الحالي: ${pos.currentPrice} | الكمية: {pos.qty}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: pos.pnl >= 0 ? '#10b981' : '#ef476f' }}>
-                    الربح/الخسارة: {pos.pnl >= 0 ? '+' : ''}${pos.pnl}
-                  </span>
-                  <button style={styles.closeBtn} onClick={() => handleClosePosition(pos.id, pos.pnl)}>إغلاق وجني الأرباح</button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* --- التبويب الثالث: تحليل السيولة والذكاء الاصطناعي --- */}
-      {activeTab === 'analytics' && (
-        <div style={styles.card}>
-          <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px', color: '#00b4d8' }}>🧠 رادار كشف الحيتان وتدفق السيولة</div>
-          <div style={styles.analyticsBox}>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#ffb703', marginBottom: '6px' }}>الأصل المحدد: {currentPairObj.name}</div>
-            <div style={{ fontSize: '11px', color: '#fff', marginBottom: '8px' }}>حالة الحيتان: {currentPairObj.whaleAlert}</div>
-            <div style={{ fontSize: '11px', color: '#8d99ae', marginBottom: '4px' }}>مؤشر السمية والضغط (VPIN Index): {(currentPairObj.vpin * 100).toFixed(1)}%</div>
-            <div style={styles.meterTrack}>
-              <div style={{ ...styles.meterFill, width: `${currentPairObj.vpin * 100}%`, backgroundColor: currentPairObj.vpin > 0.5 ? '#ef476f' : '#10b981' }} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- التبويب الرابع: إعدادات الحساب --- */}
-      {activeTab === 'settings' && (
-        <div style={styles.card}>
-          <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px' }}>ربط مفاتيح التداول الآلي (API Keys)</div>
-          <div style={{ marginBottom: '10px' }}>
-            <span style={{ fontSize: '11px', color: '#8d99ae' }}>Binance / OANDA API Key</span>
-            <input type="password" style={styles.input} placeholder="أدخل المفتاح الخاص بك" />
-          </div>
-          <div style={{ marginBottom: '12px' }}>
-            <span style={{ fontSize: '11px', color: '#8d99ae' }}>Secret Key</span>
-            <input type="password" style={styles.input} placeholder="أدخل السري الخاص بك" />
-          </div>
-          <button style={{ ...styles.tradeBtn, backgroundColor: '#00b4d8' }} onClick={() => setStatusMsg('✅ تم حفظ مفاتيح الربط وتفعيل النظام بنجاح')}>حفظ وإرسال بيانات الربط</button>
-        </div>
-      )}
-
       <div style={styles.footer}>
-        Institutional Quant & Order Flow Bot | Owner ID: 966607076
+        Institutional Visual Quant Engine | Owner ID: 966607076
       </div>
 
     </div>
@@ -268,26 +191,19 @@ export default function App() {
 
 const styles = {
   container: { backgroundColor: '#070d1a', color: '#f8f9fa', minHeight: '100vh', padding: '10px', fontFamily: 'system-ui, sans-serif' },
-  pairsBar: { display: 'flex', gap: '6px', overflowX: 'auto', marginBottom: '10px', paddingBottom: '4px' },
-  pairBtn: { flex: '0 0 auto', padding: '8px 10px', border: '1px solid', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', minWidth: '85px' },
-  headerCard: { display: 'flex', justifyContent: 'space-between', backgroundColor: '#101728', border: '1px solid #1c2541', borderRadius: '10px', padding: '12px', marginBottom: '10px' },
-  subText: { fontSize: '10px', color: '#8d99ae' },
-  modeBar: { display: 'flex', gap: '8px', marginBottom: '10px' },
-  modeBtn: { flex: 1, padding: '7px', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' },
-  tabContainer: { display: 'flex', gap: '4px', marginBottom: '10px' },
-  tab: { flex: 1, padding: '7px 4px', backgroundColor: '#101728', border: 'none', color: '#8d99ae', borderRadius: '6px', fontSize: '10px', cursor: 'pointer', textAlign: 'center' },
-  activeTab: { flex: 1, padding: '7px 4px', backgroundColor: '#1f305e', border: 'none', color: '#ffffff', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', textAlign: 'center' },
-  card: { backgroundColor: '#101728', border: '1px solid #1c2541', borderRadius: '10px', padding: '12px', marginBottom: '10px' },
-  chartWrapper: { backgroundColor: '#101728', border: '1px solid #1c2541', borderRadius: '10px', padding: '6px', marginBottom: '10px' },
-  tfBar: { display: 'flex', gap: '5px', marginBottom: '8px' },
+  pairsBar: { display: 'flex', gap: '6px', overflowX: 'auto', marginBottom: '8px', paddingBottom: '4px' },
+  pairBtn: { flex: '0 0 auto', padding: '6px 10px', border: '1px solid', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', minWidth: '80px' },
+  headerCard: { display: 'flex', justifyContent: 'space-between', backgroundColor: '#101728', border: '1px solid #1c2541', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
+  subText: { fontSize: '9px', color: '#8d99ae' },
+  tfBar: { display: 'flex', gap: '4px', marginBottom: '6px' },
   tfBtn: { flex: 1, padding: '4px', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' },
-  posCard: { backgroundColor: '#070d1a', border: '1px solid #1c2541', padding: '10px', borderRadius: '8px', marginBottom: '8px' },
-  analyticsBox: { backgroundColor: '#070d1a', border: '1px solid #1c2541', padding: '10px', borderRadius: '8px' },
-  meterTrack: { height: '6px', backgroundColor: '#101728', borderRadius: '3px', overflow: 'hidden', marginTop: '6px' },
-  meterFill: { height: '100%', transition: 'width 0.4s ease' },
-  input: { width: '100%', padding: '8px', backgroundColor: '#070d1a', border: '1px solid #1c2541', borderRadius: '6px', color: '#fff', fontSize: '12px', boxSizing: 'border-box', marginTop: '4px' },
-  tradeBtn: { flex: 1, padding: '10px', border: 'none', borderRadius: '6px', color: '#fff', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
-  closeBtn: { backgroundColor: '#ef476f', color: '#fff', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' },
-  statusBanner: { backgroundColor: '#00b4d8', color: '#070d1a', padding: '8px', borderRadius: '6px', fontSize: '11px', textAlign: 'center', fontWeight: 'bold', marginBottom: '10px' },
-  footer: { textAlign: 'center', color: '#4a5568', fontSize: '9px', marginTop: '12px' }
+  chartWrapper: { backgroundColor: '#101728', border: '1px solid #1c2541', borderRadius: '10px', padding: '4px', marginBottom: '8px' },
+  liveChartOverlayCard: { backgroundColor: '#101728', border: '1px solid #00b4d8', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
+  visualPositionRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#070d1a', padding: '8px', borderRadius: '6px', marginBottom: '6px' },
+  card: { backgroundColor: '#101728', border: '1px solid #1c2541', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
+  inputSmall: { width: '80px', padding: '4px', backgroundColor: '#070d1a', border: '1px solid #1c2541', borderRadius: '4px', color: '#fff', fontSize: '11px', textAlign: 'center' },
+  tradeBtn: { flex: 1, padding: '9px', border: 'none', borderRadius: '6px', color: '#fff', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
+  overlayCloseBtn: { backgroundColor: '#ef476f', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' },
+  statusBanner: { backgroundColor: '#00b4d8', color: '#070d1a', padding: '6px', borderRadius: '6px', fontSize: '10px', textAlign: 'center', fontWeight: 'bold', marginBottom: '8px' },
+  footer: { textAlign: 'center', color: '#4a5568', fontSize: '9px', marginTop: '8px' }
 };
