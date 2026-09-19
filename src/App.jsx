@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createChart } from 'lightweight-charts';
+import TradingPanel from './TradingPanel'; // استدعاء لوحة الذكاء الاصطناعي
 
 export default function App() {
   const [selectedPair, setSelectedPair] = useState('BTCUSD');
@@ -14,6 +15,7 @@ export default function App() {
   const chartContainerRef = useRef(null);
   const chartInstanceRef = useRef(null);
   const seriesRef = useRef(null);
+  const lastCandleRef = useRef(null); // للتحكم بالشمعة الحية الأخيرة
 
   const [marketData, setMarketData] = useState({
     BTCUSD: { name: 'BTC / USD', symbolApi: 'BTCUSDT', price: 0, color: '#f7931a' },
@@ -24,13 +26,13 @@ export default function App() {
 
   const currentPairObj = marketData[selectedPair];
 
-  // 1. إنشاء الشارت مرة واحدة فقط عند تحميل المكون لمنع شاشة السواد
+  // 1. إنشاء الشارت مرة واحدة فقط
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 260,
+      height: 280,
       layout: {
         background: { color: '#05080f' },
         textColor: '#8a99ad',
@@ -66,39 +68,9 @@ export default function App() {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, []); // يعمل مرة واحدة فقط عند الإقلاع
-
-  // 2. جلب الأسعار الحية
-  useEffect(() => {
-    const fetchLivePrices = async () => {
-      try {
-        const res = await fetch('https://api.binance.com/api/v3/ticker/price');
-        const data = await res.json();
-        
-        if (Array.isArray(data)) {
-          setMarketData(prev => {
-            const updated = { ...prev };
-            Object.keys(updated).forEach(key => {
-              const item = updated[key];
-              const match = data.find(d => d.symbol === item.symbolApi);
-              if (match) {
-                item.price = parseFloat(match.price);
-              }
-            });
-            return { ...updated };
-          });
-        }
-      } catch (error) {
-        console.error("خطأ في جلب الأسعار:", error);
-      }
-    };
-
-    fetchLivePrices();
-    const interval = setInterval(fetchLivePrices, 2000);
-    return () => clearInterval(interval);
   }, []);
 
-  // 3. تحديث البيانات عند تغير الزوج أو الفريم بدون إعادة بناء الشارت بالكامل
+  // 2. جلب الشموع التاريخية عند تغيير الزوج أو الفريم
   useEffect(() => {
     if (!seriesRef.current) return;
 
@@ -116,7 +88,9 @@ export default function App() {
             low: parseFloat(d[3]),
             close: parseFloat(d[4])
           }));
+          
           seriesRef.current.setData(formattedData);
+          lastCandleRef.current = formattedData[formattedData.length - 1];
         }
       } catch (err) {
         console.error("فشل تحميل بيانات الفريم:", err);
@@ -126,23 +100,77 @@ export default function App() {
     fetchHistoricalData();
   }, [selectedPair, timeframe]);
 
-  // تحديث الأرباح
+  // 3. جلب الأسعار الحية وتحديث الشمعة الأخيرة على الشارت لحظياً
+  useEffect(() => {
+    const fetchLivePrices = async () => {
+      try {
+        const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+        const data = await res.json();
+        
+        if (Array.isArray(data)) {
+          setMarketData(prev => {
+            const updated = { ...prev };
+            Object.keys(updated).forEach(key => {
+              const item = updated[key];
+              const match = data.find(d => d.symbol === item.symbolApi);
+              if (match) {
+                const newPrice = parseFloat(match.price);
+                item.price = newPrice;
+
+                // تحديث الشمعة الأخيرة للشارت بشكل حقيقي ومباشر
+                if (key === selectedPair && seriesRef.current && lastCandleRef.current) {
+                  const lastC = { ...lastCandleRef.current };
+                  lastC.close = newPrice;
+                  if (newPrice > lastC.high) lastC.high = newPrice;
+                  if (newPrice < lastC.low) lastC.low = newPrice;
+                  
+                  seriesRef.current.update(lastC);
+                  lastCandleRef.current = lastC;
+                }
+              }
+            });
+            return { ...updated };
+          });
+        }
+      } catch (error) {
+        console.error("خطأ في جلب الأسعار:", error);
+      }
+    };
+
+    fetchLivePrices();
+    const interval = setInterval(fetchLivePrices, 1500);
+    return () => clearInterval(interval);
+  }, [selectedPair]);
+
+  // 4. تحديث الأرباح والتحقق من الوقف والأهداف (SL / TP)
   useEffect(() => {
     if (!currentPairObj.price) return;
+    
     setPositions(prevPos => 
       prevPos.map(pos => {
         const currentP = marketData[pos.symbolKey]?.price || pos.entryPrice;
         const diff = pos.side === 'LONG' || pos.marketType === 'SPOT' ? currentP - pos.entryPrice : pos.entryPrice - currentP;
         const basePnl = diff * pos.qty;
         const pnlVal = pos.marketType === 'FUTURES' ? basePnl * pos.leverage : basePnl;
+
+        // إغلاق تلقائي إذا ضرب الوقف أو الهدف
+        if (pos.stopLoss && ((pos.side === 'LONG' && currentP <= pos.stopLoss) || (pos.side === 'SHORT' && currentP >= pos.stopLoss))) {
+          handleClosePosition(pos.id, pnlVal, 'تم ضرب الوقف (SL)');
+        }
+        if (pos.takeProfit && ((pos.side === 'LONG' && currentP >= pos.takeProfit) || (pos.side === 'SHORT' && currentP <= pos.takeProfit))) {
+          handleClosePosition(pos.id, pnlVal, 'تم تحقيق الهدف (TP)');
+        }
+
         return { ...pos, currentPrice: currentP, pnl: Number(pnlVal.toFixed(2)) };
       })
     );
-  }, [marketData, currentPairObj.price]);
+  }, [marketData]);
 
-  const handleTrade = (side) => {
+  // 5. فتح صفقة يدوية أو عن طريق البوت
+  const handleTrade = (side, customParams = {}) => {
     const entry = currentPairObj.price;
     const lev = marketType === 'FUTURES' ? parseInt(leverage) : 1;
+    
     const newPos = {
       id: Date.now(),
       marketType,
@@ -151,20 +179,33 @@ export default function App() {
       side,
       entryPrice: entry,
       currentPrice: entry,
-      qty: parseFloat(tradeAmount),
+      qty: parseFloat(customParams.qty || tradeAmount),
       leverage: lev,
+      stopLoss: customParams.stopLoss || null,
+      takeProfit: customParams.takeProfit || null,
       pnl: 0.00
     };
+
     setPositions([newPos, ...positions]);
-    setStatusMsg(`🚀 تم فتح الصفقة بنجاح على السعر الحي (${entry})`);
-    setTimeout(() => setStatusMsg(''), 3000);
+    setStatusMsg(`🚀 تم فتح صفقة ${side} بنجاح على سعر (${entry})`);
+    setTimeout(() => setStatusMsg(''), 4000);
   };
 
-  const handleClosePosition = (id, pnl) => {
+  // 6. تنفيذ توصيات الذكاء الاصطناعي (Groq AI)
+  const handleAiExecute = (decision) => {
+    if (decision.action === 'WAIT') return;
+    const side = decision.action === 'BUY' ? 'LONG' : 'SHORT';
+    handleTrade(side, {
+      stopLoss: decision.stopLoss,
+      takeProfit: decision.takeProfit
+    });
+  };
+
+  const handleClosePosition = (id, pnl, reason = '') => {
     setBalance(prev => Number((prev + pnl).toFixed(2)));
-    setPositions(positions.filter(p => p.id !== id));
-    setStatusMsg(`✅ تم إغلاق الصفقة وتسجيل الأرباح: ${pnl >= 0 ? '+' : ''}$${pnl}`);
-    setTimeout(() => setStatusMsg(''), 3000);
+    setPositions(prev => prev.filter(p => p.id !== id));
+    setStatusMsg(`✅ تم إغلاق الصفقة ${reason}. PnL: ${pnl >= 0 ? '+' : ''}$${pnl}`);
+    setTimeout(() => setStatusMsg(''), 4000);
   };
 
   const currentPairPositions = positions.filter(p => p.symbolKey === selectedPair);
@@ -197,7 +238,7 @@ export default function App() {
             onClick={() => setSelectedPair(key)}
           >
             <div style={{ fontSize: '11px', fontWeight: 'bold', color: item.color }}>{item.name}</div>
-            <div style={{ fontSize: '10px', color: '#fff' }}>${item.price ? item.price.toLocaleString() : 'جاري التحميل...'}</div>
+            <div style={{ fontSize: '10px', color: '#fff' }}>${item.price ? item.price.toLocaleString() : '...' }</div>
           </button>
         ))}
       </div>
@@ -223,17 +264,17 @@ export default function App() {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={styles.subText}>حالة السوق</div>
-          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#00f5d4' }}>🟢 متصل حياً</div>
+          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#00f5d4' }}>🟢 متصل حياً (Live Stream)</div>
         </div>
       </div>
 
-      {/* الشارت المحدث بدون شاشات سوداء */}
+      {/* الشارت المحدث لحظياً */}
       <div style={styles.chartWrapper}>
         <div style={styles.chartHeader}>
           <span>📊 شارت تفاعلي ({currentPairObj.name})</span>
           <span style={{ color: '#00f5d4' }}>${currentPairObj.price} USD</span>
         </div>
-        <div ref={chartContainerRef} style={{ width: '100%', height: '260px' }} />
+        <div ref={chartContainerRef} style={{ width: '100%', height: '280px' }} />
       </div>
 
       {/* الصفقات النشطة */}
@@ -250,6 +291,14 @@ export default function App() {
                   {pos.pnl >= 0 ? '+' : ''}${pos.pnl} USD
                 </span>
               </div>
+
+              {(pos.stopLoss || pos.takeProfit) && (
+                <div style={{ fontSize: '10px', color: '#8a99ad', display: 'flex', gap: '10px', marginBottom: '4px' }}>
+                  {pos.stopLoss && <span>🛑 الوقف: <b style={{ color: '#ef4444' }}>${pos.stopLoss}</b></span>}
+                  {pos.takeProfit && <span>🎯 الهدف: <b style={{ color: '#22c55e' }}>${pos.takeProfit}</b></span>}
+                </div>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
                 <button style={styles.closeBtnLarge} onClick={() => handleClosePosition(pos.id, pos.pnl)}>إغلاق الصفقة</button>
               </div>
@@ -258,7 +307,7 @@ export default function App() {
         </div>
       )}
 
-      {/* لوحة التحكم */}
+      {/* لوحة التحكم بالتداول اليدوي */}
       <div style={styles.card}>
         {marketType === 'FUTURES' && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -298,6 +347,14 @@ export default function App() {
         </div>
       </div>
 
+      {/* دمج لوحة الذكاء الاصطناعي لتوليد الإشارات والتداول الآلي */}
+      <div style={{ marginTop: '12px' }}>
+        <TradingPanel 
+          currentPrice={currentPairObj.price} 
+          onExecuteTrade={handleAiExecute} 
+        />
+      </div>
+
       {statusMsg && <div style={styles.statusBanner}>{statusMsg}</div>}
 
       <div style={styles.footer}>
@@ -327,6 +384,6 @@ const styles = {
   selectInput: { width: '100%', padding: '6px', backgroundColor: '#05080f', border: '1px solid #1c2841', borderRadius: '4px', color: '#fff', fontSize: '11px', textAlign: 'center', boxSizing: 'border-box', marginTop: '2px' },
   tradeBtn: { flex: 1, padding: '10px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
   closeBtnLarge: { backgroundColor: '#f72585', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' },
-  statusBanner: { backgroundColor: '#4cc9f0', color: '#05080f', padding: '6px', borderRadius: '6px', fontSize: '10px', textAlign: 'center', fontWeight: 'bold', marginBottom: '8px' },
+  statusBanner: { backgroundColor: '#4cc9f0', color: '#05080f', padding: '6px', borderRadius: '6px', fontSize: '10px', textAlign: 'center', fontWeight: 'bold', marginTop: '8px' },
   footer: { textAlign: 'center', color: '#3a4b6c', fontSize: '9px', marginTop: '8px' }
 };
