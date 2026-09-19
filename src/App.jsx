@@ -7,68 +7,26 @@ export default function App() {
   const [timeframe, setTimeframe] = useState('1m');
   const [tradeAmount, setTradeAmount] = useState('0.05');
   const [leverage, setLeverage] = useState('20');
-  const [tpPercent, setTpPercent] = useState('2.0');
-  const [slPercent, setSlPercent] = useState('1.0');
   const [statusMsg, setStatusMsg] = useState('');
   const [positions, setPositions] = useState([]);
   const [balance, setBalance] = useState(10000.00);
 
   const chartContainerRef = useRef(null);
-  const heatmapCanvasRef = useRef(null);
   const chartInstanceRef = useRef(null);
   const seriesRef = useRef(null);
-  const priceLinesRef = useRef([]);
 
   const [marketData, setMarketData] = useState({
     BTCUSD: { name: 'BTC / USD', symbolApi: 'BTCUSDT', price: 0, color: '#f7931a' },
     ETHUSD: { name: 'ETH / USD', symbolApi: 'ETHUSDT', price: 0, color: '#627eea' },
     XAUUSD: { name: 'الذهب (XAU/USD)', symbolApi: 'PAXGUSDT', price: 0, color: '#ffd700' },
-    XAGUSD: { name: 'الفضة (XAG/USD)', symbolApi: 'LTCUSDT', price: 0, color: '#c0c0c0' } // مثال أصل بديل حي
+    XAGUSD: { name: 'الفضة (XAG/USD)', symbolApi: 'LTCUSDT', price: 0, color: '#c0c0c0' }
   });
 
   const currentPairObj = marketData[selectedPair];
 
-  const [orderBook, setOrderBook] = useState({ asks: [], bids: [] });
-  const [timeAndSales, setTimeAndSales] = useState([]);
-
-  // 1. جلب الأسعار الحية المباشرة
-  useEffect(() => {
-    const fetchLivePrices = async () => {
-      try {
-        const res = await fetch('https://api.binance.com/api/v3/ticker/price');
-        const data = await res.json();
-        
-        if (Array.isArray(data)) {
-          setMarketData(prev => {
-            const updated = { ...prev };
-            Object.keys(updated).forEach(key => {
-              const item = updated[key];
-              const match = data.find(d => d.symbol === item.symbolApi);
-              if (match) {
-                item.price = parseFloat(match.price);
-              }
-            });
-            return { ...updated };
-          });
-        }
-      } catch (error) {
-        console.error("خطأ في جلب الأسعار الحية:", error);
-      }
-    };
-
-    fetchLivePrices();
-    const interval = setInterval(fetchLivePrices, 1500);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 2. جلب الشموع الحقيقية التاريخية واللحظية من السوق (Binance Klines API) للشارت المتقدم
+  // 1. إنشاء الشارت مرة واحدة فقط عند تحميل المكون لمنع شاشة السواد
   useEffect(() => {
     if (!chartContainerRef.current) return;
-
-    // تنظيف الشارت القديم إن وجد
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.remove();
-    }
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
@@ -94,10 +52,56 @@ export default function App() {
       wickDownColor: '#f72585',
     });
 
-    seriesRef.current = candleSeries;
     chartInstanceRef.current = chart;
+    seriesRef.current = candleSeries;
 
-    // جلب البيانات الحقيقية للشموع من المنصة
+    const handleResize = () => {
+      if (chartContainerRef.current && chartInstanceRef.current) {
+        chartInstanceRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, []); // يعمل مرة واحدة فقط عند الإقلاع
+
+  // 2. جلب الأسعار الحية
+  useEffect(() => {
+    const fetchLivePrices = async () => {
+      try {
+        const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+        const data = await res.json();
+        
+        if (Array.isArray(data)) {
+          setMarketData(prev => {
+            const updated = { ...prev };
+            Object.keys(updated).forEach(key => {
+              const item = updated[key];
+              const match = data.find(d => d.symbol === item.symbolApi);
+              if (match) {
+                item.price = parseFloat(match.price);
+              }
+            });
+            return { ...updated };
+          });
+        }
+      } catch (error) {
+        console.error("خطأ في جلب الأسعار:", error);
+      }
+    };
+
+    fetchLivePrices();
+    const interval = setInterval(fetchLivePrices, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 3. تحديث البيانات عند تغير الزوج أو الفريم بدون إعادة بناء الشارت بالكامل
+  useEffect(() => {
+    if (!seriesRef.current) return;
+
     const fetchHistoricalData = async () => {
       try {
         const symbol = currentPairObj.symbolApi;
@@ -112,34 +116,19 @@ export default function App() {
             low: parseFloat(d[3]),
             close: parseFloat(d[4])
           }));
-          candleSeries.setData(formattedData);
+          seriesRef.current.setData(formattedData);
         }
       } catch (err) {
-        console.error("فشل في تحميل بيانات الشارت الحقيقية:", err);
+        console.error("فشل تحميل بيانات الفريم:", err);
       }
     };
 
     fetchHistoricalData();
-
-    const handleResize = () => {
-      if (chartContainerRef.current && chartInstanceRef.current) {
-        chartInstanceRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (chartInstanceRef.current) {
-        chartInstanceRef.current.remove();
-      }
-    };
   }, [selectedPair, timeframe]);
 
-  // 3. تحديث الأرباح والصفقات والسيولة الحية
+  // تحديث الأرباح
   useEffect(() => {
     if (!currentPairObj.price) return;
-
     setPositions(prevPos => 
       prevPos.map(pos => {
         const currentP = marketData[pos.symbolKey]?.price || pos.entryPrice;
@@ -151,61 +140,31 @@ export default function App() {
     );
   }, [marketData, currentPairObj.price]);
 
-  // رسم خريطة السيولة الحرارية التفاعلية
-  useEffect(() => {
-    const canvas = heatmapCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-
-    ctx.clearRect(0, 0, width, height);
-    const cols = 25;
-    const rows = 12;
-    const colWidth = width / cols;
-    const rowHeight = height / rows;
-
-    for (let x = 0; x < cols; x++) {
-      for (let y = 0; y < rows; y++) {
-        const wave = Math.sin((x + Date.now() * 0.001) * 0.5) * Math.cos(y * 0.5);
-        if (wave > 0.15) {
-          const alpha = Math.min(wave * 0.55, 0.7);
-          ctx.fillStyle = y < rows / 2 
-            ? `rgba(247, 37, 133, ${alpha})` 
-            : `rgba(0, 245, 212, ${alpha})`;
-          ctx.fillRect(x * colWidth, y * rowHeight, colWidth - 1, rowHeight - 1);
-        }
-      }
-    }
-  }, [marketData]);
-
   const handleTrade = (side) => {
     const entry = currentPairObj.price;
     const lev = marketType === 'FUTURES' ? parseInt(leverage) : 1;
-
     const newPos = {
       id: Date.now(),
-      marketType: marketType,
+      marketType,
       symbolKey: selectedPair,
       symbolName: currentPairObj.name,
-      side: side,
+      side,
       entryPrice: entry,
       currentPrice: entry,
       qty: parseFloat(tradeAmount),
       leverage: lev,
       pnl: 0.00
     };
-
     setPositions([newPos, ...positions]);
-    setStatusMsg(`🚀 تم فتح الصفقة بنجاح على السعر الحقيقي المباشر (${entry})`);
-    setTimeout(() => setStatusMsg(''), 4000);
+    setStatusMsg(`🚀 تم فتح الصفقة بنجاح على السعر الحي (${entry})`);
+    setTimeout(() => setStatusMsg(''), 3000);
   };
 
   const handleClosePosition = (id, pnl) => {
     setBalance(prev => Number((prev + pnl).toFixed(2)));
     setPositions(positions.filter(p => p.id !== id));
     setStatusMsg(`✅ تم إغلاق الصفقة وتسجيل الأرباح: ${pnl >= 0 ? '+' : ''}$${pnl}`);
-    setTimeout(() => setStatusMsg(''), 4000);
+    setTimeout(() => setStatusMsg(''), 3000);
   };
 
   const currentPairPositions = positions.filter(p => p.symbolKey === selectedPair);
@@ -229,7 +188,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* شريط الأزواج الحية */}
+      {/* شريط الأزواج */}
       <div style={styles.pairsBar}>
         {Object.entries(marketData).map(([key, item]) => (
           <button
@@ -243,7 +202,7 @@ export default function App() {
         ))}
       </div>
 
-      {/* إطارات الوقت للشارت المتقدم */}
+      {/* إطارات الوقت (فريمات) */}
       <div style={styles.timeframeBar}>
         {['1m', '5m', '15m', '1h'].map(tf => (
           <button
@@ -259,36 +218,28 @@ export default function App() {
       {/* المحفظة */}
       <div style={styles.headerCard}>
         <div>
-          <div style={styles.subText}>الرصيد المتاح للمحفظة</div>
+          <div style={styles.subText}>الرصيد المتاح</div>
           <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#00f5d4' }}>${balance.toLocaleString()} USD</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={styles.subText}>حالة الاتصال بالسوق</div>
-          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#00f5d4' }}>🟢 متصل (Live API)</div>
+          <div style={styles.subText}>حالة السوق</div>
+          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#00f5d4' }}>🟢 متصل حياً</div>
         </div>
       </div>
 
-      {/* الشارت المتقدم بالبيانات الحقيقية */}
+      {/* الشارت المحدث بدون شاشات سوداء */}
       <div style={styles.chartWrapper}>
         <div style={styles.chartHeader}>
-          <span>📊 شارت حقيقي ({currentPairObj.name})</span>
+          <span>📊 شارت تفاعلي ({currentPairObj.name})</span>
           <span style={{ color: '#00f5d4' }}>${currentPairObj.price} USD</span>
         </div>
-        <div style={{ position: 'relative', width: '100%' }}>
-          <canvas 
-            ref={heatmapCanvasRef} 
-            width={380} 
-            height={260} 
-            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }} 
-          />
-          <div ref={chartContainerRef} style={{ width: '100%', position: 'relative', zIndex: 2 }} />
-        </div>
+        <div ref={chartContainerRef} style={{ width: '100%', height: '260px' }} />
       </div>
 
       {/* الصفقات النشطة */}
       {currentPairPositions.length > 0 && (
         <div style={styles.activePositionsCard}>
-          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#fca311', marginBottom: '6px' }}>💼 الصفقات النشطة الحالية:</div>
+          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#fca311', marginBottom: '6px' }}>💼 الصفقات النشطة:</div>
           {currentPairPositions.map(pos => (
             <div key={pos.id} style={{ ...styles.posRow, borderRight: `4px solid ${pos.side === 'LONG' ? '#00f5d4' : '#f72585'}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -307,7 +258,7 @@ export default function App() {
         </div>
       )}
 
-      {/* لوحة تنفيذ الصفقات */}
+      {/* لوحة التحكم */}
       <div style={styles.card}>
         {marketType === 'FUTURES' && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -350,7 +301,7 @@ export default function App() {
       {statusMsg && <div style={styles.statusBanner}>{statusMsg}</div>}
 
       <div style={styles.footer}>
-        Advanced Live Market Engine | Owner ID: 966607076
+        Stable Chart Live Engine | Owner ID: 966607076
       </div>
 
     </div>
