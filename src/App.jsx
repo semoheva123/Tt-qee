@@ -12,12 +12,13 @@ export default function App() {
   const [balance, setBalance] = useState(10000.00);
 
   const chartContainerRef = useRef(null);
+  const heatmapCanvasRef = useRef(null);
   const chartInstanceRef = useRef(null);
   const seriesRef = useRef(null);
   const priceLinesRef = useRef([]);
 
   const [marketData, setMarketData] = useState({
-    BTCUSDT: { name: 'BTC / USDT', price: 64250.00, color: '#f7931a' },
+    BTCUSDT: { name: 'BTC / USDT', price: 64256.38, color: '#f7931a' },
     ETHUSDT: { name: 'ETH / USDT', price: 3480.50, color: '#627eea' },
     XAUUSD: { name: 'الذهب (XAU)', price: 2392.40, color: '#ffd700' },
     XAGUSD: { name: 'الفضة (XAG)', price: 28.90, color: '#c0c0c0' }
@@ -25,24 +26,20 @@ export default function App() {
 
   const currentPairObj = marketData[selectedPair];
 
-  // بيانات دفتر الأوامر الحي (Order Book DOM)
   const [orderBook, setOrderBook] = useState({ asks: [], bids: [] });
-  // سجل الصفقات المبرمة (Time & Sales Tape)
   const [timeAndSales, setTimeAndSales] = useState([]);
 
-  // محاكاة دفقة الأوامر وسجل الصفقات
+  // محاكاة دفتر الأوامر الحقيقي (DOM)
   useEffect(() => {
     const p = currentPairObj.price;
     const step = selectedPair === 'BTCUSDT' ? 10 : 1;
     
-    // بناء Asks (عروض البيع أعلى السعر)
     const asks = Array.from({ length: 5 }, (_, i) => ({
       price: Number((p + (5 - i) * step).toFixed(2)),
       size: Number((Math.random() * 2 + 0.1).toFixed(3)),
       total: Number((Math.random() * 10 + 2).toFixed(2))
     })).reverse();
 
-    // بناء Bids (طلبات الشراء أقل السعر)
     const bids = Array.from({ length: 5 }, (_, i) => ({
       price: Number((p - (i + 1) * step).toFixed(2)),
       size: Number((Math.random() * 2 + 0.1).toFixed(3)),
@@ -52,13 +49,13 @@ export default function App() {
     setOrderBook({ asks, bids });
   }, [selectedPair, currentPairObj.price]);
 
-  // تهيئة الشارت الاحترافي
+  // تهيئة الشارت
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 270,
+      height: 250,
       layout: {
         background: { color: '#05080f' },
         textColor: '#8a99ad',
@@ -81,11 +78,11 @@ export default function App() {
     });
 
     const baseline = selectedPair === 'BTCUSDT' ? 64250 : selectedPair === 'ETHUSDT' ? 3480 : 2390;
-    let currTime = Math.floor(Date.now() / 1000) - 150 * 60;
+    let currTime = Math.floor(Date.now() / 1000) - 120 * 60;
     let lastClose = baseline;
     
     const initialData = [];
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < 120; i++) {
       const open = lastClose;
       const change = (Math.random() - 0.48) * (baseline * 0.002);
       const close = open + change;
@@ -114,13 +111,43 @@ export default function App() {
     };
   }, [selectedPair]);
 
-  // تحديث الأسعار، الصفقات الحية، والبوك ماب ثانية بسانية
+  // رسم الخريطة الحرارية (Heatmap Canvas Engine) خلف الشارت
+  useEffect(() => {
+    const canvas = heatmapCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    ctx.clearRect(0, 0, width, height);
+
+    // رسم تدرجات السيولة الحرارية (Bookmap Liquidity Nodes)
+    const cols = 40;
+    const rows = 15;
+    const colWidth = width / cols;
+    const rowHeight = height / rows;
+
+    for (let x = 0; x < cols; x++) {
+      for (let y = 0; y < rows; y++) {
+        // توليد كثافة سيولة وهمية متغيرة نابضة بالحياة
+        const intensity = Math.sin(x * 0.3 + Date.now() * 0.002) * Math.cos(y * 0.4);
+        if (intensity > 0.3) {
+          ctx.fillStyle = y < rows / 2 
+            ? `rgba(247, 37, 133, ${intensity * 0.35})` // سيولة عروض البيع (مجنتا/أحمر)
+            : `rgba(0, 245, 212, ${intensity * 0.35})`; // سيولة طلبات الشراء (تركواز/أخضر)
+          ctx.fillRect(x * colWidth, y * rowHeight, colWidth - 1, rowHeight - 1);
+        }
+      }
+    }
+  }, [marketData]);
+
+  // تحديث البيانات دورياً
   useEffect(() => {
     const interval = setInterval(() => {
       setMarketData(prev => {
         const updated = { ...prev };
         const sym = selectedPair;
-        const fluctuation = (Math.random() - 0.49) * (sym === 'BTCUSDT' ? 35 : 5);
+        const fluctuation = (Math.random() - 0.49) * (sym === 'BTCUSDT' ? 30 : 5);
         const newPrice = Number((updated[sym].price + fluctuation).toFixed(2));
         updated[sym].price = newPrice;
 
@@ -129,15 +156,14 @@ export default function App() {
           seriesRef.current.update({
             time: currentTime - (currentTime % 60),
             open: newPrice - 10,
-            high: newPrice + 15,
-            low: newPrice - 20,
+            high: newPrice + 12,
+            low: newPrice - 15,
             close: newPrice
           });
         }
         return updated;
       });
 
-      // توليد صفقة جديدة في شريط Time & Sales
       const isBuy = Math.random() > 0.45;
       const newTrade = {
         id: Date.now(),
@@ -163,7 +189,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [selectedPair, marketData, currentPairObj.price]);
 
-  // رسم خطوط الأهداف والأرباح مباشرة على الشارت
+  // ربط الأهداف بالخطوط على الشارت
   useEffect(() => {
     if (!seriesRef.current) return;
 
@@ -235,7 +261,7 @@ export default function App() {
     };
 
     setPositions([newPos, ...positions]);
-    setStatusMsg(`🚀 تم تنفيذ الصفقة عبر محرك التداول المؤسسي الحقيقي!`);
+    setStatusMsg(`🚀 تم تنفيذ الصفقة بنجاح عبر الخريطة الحرارية المؤسسية!`);
     setTimeout(() => setStatusMsg(''), 4000);
   };
 
@@ -245,7 +271,7 @@ export default function App() {
     }
     setBalance(prev => Number((prev + pnl).toFixed(2)));
     setPositions(positions.filter(p => p.id !== id));
-    setStatusMsg(`✅ تم إغلاق الصفقة. النتيجة: ${pnl >= 0 ? '+' : ''}$${pnl}`);
+    setStatusMsg(`✅ تم إغلاق الصفقة بقيمة: ${pnl >= 0 ? '+' : ''}$${pnl}`);
     setTimeout(() => setStatusMsg(''), 4000);
   };
 
@@ -295,26 +321,35 @@ export default function App() {
           <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#00f5d4' }}>${balance.toLocaleString()}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={styles.subText}>حالة محرك السوق</div>
-          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#4cc9f0' }}>DOM & Time&Sales Active 🟢</div>
+          <div style={styles.subText}>محرك السيولة الحرارية</div>
+          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#f72585' }}>Bookmap Heatmap Active 🔥</div>
         </div>
       </div>
 
-      {/* الشارت المدمج */}
+      {/* الشارت المدمج مع الخريطة الحرارية (Heatmap Overlay) */}
       <div style={styles.chartWrapper}>
         <div style={styles.chartHeader}>
-          <span>⚡ Interactive Candlestick Chart ({currentPairObj.name})</span>
+          <span>🔥 Bookmap Heatmap & Chart ({currentPairObj.name})</span>
           <span style={{ color: '#00f5d4' }}>${currentPairObj.price}</span>
         </div>
-        <div ref={chartContainerRef} style={{ width: '100%' }} />
+        <div style={{ position: 'relative', width: '100%' }}>
+          {/* طبقة الكانفاس الحرارية تحت الشارت مباشرة */}
+          <canvas 
+            ref={heatmapCanvasRef} 
+            width={380} 
+            height={250} 
+            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1, opacity: 0.85 }} 
+          />
+          <div ref={chartContainerRef} style={{ width: '100%', position: 'relative', zIndex: 2 }} />
+        </div>
       </div>
 
-      {/* قسم احترافي مقسم لجزأين: دفتر الأوامر (DOM) وسجل الصفقات الحية (Time & Sales) */}
+      {/* دفتر الأوامر وسجل الصفقات */}
       <div style={styles.marketDeepGrid}>
         
-        {/* دفتر الأوامر (Order Book DOM) */}
+        {/* دفتر الأوامر (DOM) */}
         <div style={styles.domCard}>
-          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#4cc9f0', marginBottom: '4px', textAlign: 'center' }}>دفتر الأوامر الحقيقي (DOM)</div>
+          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#4cc9f0', marginBottom: '4px', textAlign: 'center' }}>دفتر الأوامر الحي (DOM)</div>
           <div style={styles.domTableHeader}><span>العرض (Ask)</span><span>السعر</span><span>الحجم</span></div>
           {orderBook.asks.map((ask, idx) => (
             <div key={idx} style={styles.domRowAsk}>
@@ -333,7 +368,7 @@ export default function App() {
           ))}
         </div>
 
-        {/* سجل الصفقات المبرمة (Time & Sales Tape) */}
+        {/* سجل الصفقات (Time & Sales) */}
         <div style={styles.domCard}>
           <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#fca311', marginBottom: '4px', textAlign: 'center' }}>شريط الصفقات (Time & Sales)</div>
           <div style={styles.domTableHeader}><span>الوقت</span><span>السعر</span><span>الحجم</span></div>
@@ -348,7 +383,7 @@ export default function App() {
 
       </div>
 
-      {/* الصفقات النشطة وأهداف الشارت */}
+      {/* الصفقات النشطة */}
       {currentPairPositions.length > 0 && (
         <div style={styles.activePositionsCard}>
           <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#fca311', marginBottom: '6px' }}>💼 الصفقات النشطة والتحكم بخطوط الشارت:</div>
@@ -392,7 +427,7 @@ export default function App() {
         </div>
       )}
 
-      {/* لوحة فتح الصفقة الفاخرة */}
+      {/* لوحة التنفيذ */}
       <div style={styles.card}>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
           <div style={{ flex: 1 }}>
@@ -431,7 +466,7 @@ export default function App() {
       {statusMsg && <div style={styles.statusBanner}>{statusMsg}</div>}
 
       <div style={styles.footer}>
-        Institutional DOM & Time&Sales Quant Engine | Owner ID: 966607076
+        Bookmap Heatmap Quant Engine | Owner ID: 966607076
       </div>
 
     </div>
@@ -459,7 +494,7 @@ const styles = {
   card: { backgroundColor: '#0b111e', border: '1px solid #1c2841', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
   inputSmall: { width: '100%', padding: '6px', backgroundColor: '#05080f', border: '1px solid #1c2841', borderRadius: '4px', color: '#fff', fontSize: '11px', textAlign: 'center', boxSizing: 'border-box', marginTop: '2px' },
   selectInput: { width: '100%', padding: '6px', backgroundColor: '#05080f', border: '1px solid #1c2841', borderRadius: '4px', color: '#fff', fontSize: '11px', textAlign: 'center', boxSizing: 'border-box', marginTop: '2px' },
-  tradeBtn: { flex: 1, padding: '10px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
+  tradeBtn: { flex: '1', padding: '10px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
   closeBtnLarge: { backgroundColor: '#f72585', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold', alignSelf: 'center' },
   statusBanner: { backgroundColor: '#4cc9f0', color: '#05080f', padding: '6px', borderRadius: '6px', fontSize: '10px', textAlign: 'center', fontWeight: 'bold', marginBottom: '8px' },
   footer: { textAlign: 'center', color: '#3a4b6c', fontSize: '9px', marginTop: '8px' }
