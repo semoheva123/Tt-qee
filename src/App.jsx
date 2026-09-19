@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createChart } from 'lightweight-charts';
-import TradingPanel from './TradingPanel'; // استدعاء لوحة الذكاء الاصطناعي
 
 export default function App() {
   const [selectedPair, setSelectedPair] = useState('BTCUSD');
@@ -9,13 +8,22 @@ export default function App() {
   const [tradeAmount, setTradeAmount] = useState('0.05');
   const [leverage, setLeverage] = useState('20');
   const [statusMsg, setStatusMsg] = useState('');
-  const [positions, setPositions] = useState([]);
-  const [balance, setBalance] = useState(10000.00);
+
+  // 1. استرجاع الرصيد والصفقات من localStorage لمنع فقدان البيانات عند إغلاق/تحديث المتصفح
+  const [balance, setBalance] = useState(() => {
+    const savedBalance = localStorage.getItem('bot_balance');
+    return savedBalance !== null ? parseFloat(savedBalance) : 10000.00;
+  });
+
+  const [positions, setPositions] = useState(() => {
+    const savedPositions = localStorage.getItem('bot_positions');
+    return savedPositions ? JSON.parse(savedPositions) : [];
+  });
 
   const chartContainerRef = useRef(null);
   const chartInstanceRef = useRef(null);
   const seriesRef = useRef(null);
-  const lastCandleRef = useRef(null); // للتحكم بالشمعة الحية الأخيرة
+  const lastCandleRef = useRef(null);
 
   const [marketData, setMarketData] = useState({
     BTCUSD: { name: 'BTC / USD', symbolApi: 'BTCUSDT', price: 0, color: '#f7931a' },
@@ -26,7 +34,16 @@ export default function App() {
 
   const currentPairObj = marketData[selectedPair];
 
-  // 1. إنشاء الشارت مرة واحدة فقط
+  // 2. التخزين التلقائي للبيانات كلما تغير الرصيد أو الصفقات
+  useEffect(() => {
+    localStorage.setItem('bot_balance', balance.toString());
+  }, [balance]);
+
+  useEffect(() => {
+    localStorage.setItem('bot_positions', JSON.stringify(positions));
+  }, [positions]);
+
+  // 3. إنشاء الشارت مرة واحدة فقط عند إقلاع الواجهة
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -70,7 +87,7 @@ export default function App() {
     };
   }, []);
 
-  // 2. جلب الشموع التاريخية عند تغيير الزوج أو الفريم
+  // 4. جلب الشموع التاريخية عند تغيير الزوج أو الفريم الزمني
   useEffect(() => {
     if (!seriesRef.current) return;
 
@@ -88,26 +105,32 @@ export default function App() {
             low: parseFloat(d[3]),
             close: parseFloat(d[4])
           }));
-          
+
           seriesRef.current.setData(formattedData);
           lastCandleRef.current = formattedData[formattedData.length - 1];
         }
       } catch (err) {
-        console.error("فشل تحميل بيانات الفريم:", err);
+        console.error("فشل تحميل البيانات التاريخية:", err);
       }
     };
 
     fetchHistoricalData();
   }, [selectedPair, timeframe]);
 
-  // 3. جلب الأسعار الحية وتحديث الشمعة الأخيرة على الشارت لحظياً
+  // 5. جلب الأسعار الحية بشكل آمن لمنع حظر الطلبات وتجمد الشاشة
   useEffect(() => {
+    let isSubscribed = true;
+    let isFetching = false;
+
     const fetchLivePrices = async () => {
+      if (isFetching) return;
+      isFetching = true;
+
       try {
         const res = await fetch('https://api.binance.com/api/v3/ticker/price');
         const data = await res.json();
-        
-        if (Array.isArray(data)) {
+
+        if (isSubscribed && Array.isArray(data)) {
           setMarketData(prev => {
             const updated = { ...prev };
             Object.keys(updated).forEach(key => {
@@ -117,60 +140,78 @@ export default function App() {
                 const newPrice = parseFloat(match.price);
                 item.price = newPrice;
 
-                // تحديث الشمعة الأخيرة للشارت بشكل حقيقي ومباشر
                 if (key === selectedPair && seriesRef.current && lastCandleRef.current) {
                   const lastC = { ...lastCandleRef.current };
                   lastC.close = newPrice;
                   if (newPrice > lastC.high) lastC.high = newPrice;
                   if (newPrice < lastC.low) lastC.low = newPrice;
-                  
+
                   seriesRef.current.update(lastC);
                   lastCandleRef.current = lastC;
                 }
               }
             });
-            return { ...updated };
+            return updated;
           });
         }
       } catch (error) {
-        console.error("خطأ في جلب الأسعار:", error);
+        console.error("خطأ جلب الأسعار الحية:", error);
+      } finally {
+        isFetching = false;
       }
     };
 
     fetchLivePrices();
-    const interval = setInterval(fetchLivePrices, 1500);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchLivePrices, 2000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
   }, [selectedPair]);
 
-  // 4. تحديث الأرباح والتحقق من الوقف والأهداف (SL / TP)
+  // 6. تحديث الأرباح والتحقق من الوقف والهدف (SL/TP) بدون Infinite Loops
   useEffect(() => {
-    if (!currentPairObj.price) return;
-    
-    setPositions(prevPos => 
-      prevPos.map(pos => {
-        const currentP = marketData[pos.symbolKey]?.price || pos.entryPrice;
-        const diff = pos.side === 'LONG' || pos.marketType === 'SPOT' ? currentP - pos.entryPrice : pos.entryPrice - currentP;
-        const basePnl = diff * pos.qty;
-        const pnlVal = pos.marketType === 'FUTURES' ? basePnl * pos.leverage : basePnl;
+    const currentP = currentPairObj?.price;
+    if (!currentP || positions.length === 0) return;
 
-        // إغلاق تلقائي إذا ضرب الوقف أو الهدف
-        if (pos.stopLoss && ((pos.side === 'LONG' && currentP <= pos.stopLoss) || (pos.side === 'SHORT' && currentP >= pos.stopLoss))) {
-          handleClosePosition(pos.id, pnlVal, 'تم ضرب الوقف (SL)');
-        }
-        if (pos.takeProfit && ((pos.side === 'LONG' && currentP >= pos.takeProfit) || (pos.side === 'SHORT' && currentP <= pos.takeProfit))) {
-          handleClosePosition(pos.id, pnlVal, 'تم تحقيق الهدف (TP)');
-        }
+    let totalClosedPnl = 0;
+    const closedIds = [];
 
-        return { ...pos, currentPrice: currentP, pnl: Number(pnlVal.toFixed(2)) };
-      })
-    );
-  }, [marketData]);
+    const updatedPositions = positions.map(pos => {
+      if (pos.symbolKey !== selectedPair) return pos;
 
-  // 5. فتح صفقة يدوية أو عن طريق البوت
+      const diff = pos.side === 'LONG' || pos.marketType === 'SPOT' ? currentP - pos.entryPrice : pos.entryPrice - currentP;
+      const basePnl = diff * pos.qty;
+      const pnlVal = pos.marketType === 'FUTURES' ? basePnl * pos.leverage : basePnl;
+
+      const isHitSL = pos.stopLoss && ((pos.side === 'LONG' && currentP <= pos.stopLoss) || (pos.side === 'SHORT' && currentP >= pos.stopLoss));
+      const isHitTP = pos.takeProfit && ((pos.side === 'LONG' && currentP >= pos.takeProfit) || (pos.side === 'SHORT' && currentP <= pos.takeProfit));
+
+      if (isHitSL || isHitTP) {
+        closedIds.push(pos.id);
+        totalClosedPnl += pnlVal;
+      }
+
+      return { ...pos, currentPrice: currentP, pnl: Number(pnlVal.toFixed(2)) };
+    });
+
+    if (closedIds.length > 0) {
+      setBalance(prev => Number((prev + totalClosedPnl).toFixed(2)));
+      setPositions(prev => prev.filter(p => !closedIds.includes(p.id)));
+      setStatusMsg(`✅ تم إغلاق ${closedIds.length} صفقة تلقائياً (SL/TP)`);
+      setTimeout(() => setStatusMsg(''), 3000);
+    } else {
+      setPositions(updatedPositions);
+    }
+  }, [marketData[selectedPair]?.price]);
+
+  // 7. فتح وإغلاق الصفقات وإعادة ضبط الحساب
   const handleTrade = (side, customParams = {}) => {
     const entry = currentPairObj.price;
+    if (!entry) return;
+
     const lev = marketType === 'FUTURES' ? parseInt(leverage) : 1;
-    
     const newPos = {
       id: Date.now(),
       marketType,
@@ -186,34 +227,34 @@ export default function App() {
       pnl: 0.00
     };
 
-    setPositions([newPos, ...positions]);
-    setStatusMsg(`🚀 تم فتح صفقة ${side} بنجاح على سعر (${entry})`);
-    setTimeout(() => setStatusMsg(''), 4000);
+    setPositions(prev => [newPos, ...prev]);
+    setStatusMsg(`🚀 تم فتح صفقة ${side} على سعر (${entry})`);
+    setTimeout(() => setStatusMsg(''), 3000);
   };
 
-  // 6. تنفيذ توصيات الذكاء الاصطناعي (Groq AI)
-  const handleAiExecute = (decision) => {
-    if (decision.action === 'WAIT') return;
-    const side = decision.action === 'BUY' ? 'LONG' : 'SHORT';
-    handleTrade(side, {
-      stopLoss: decision.stopLoss,
-      takeProfit: decision.takeProfit
-    });
-  };
-
-  const handleClosePosition = (id, pnl, reason = '') => {
+  const handleClosePosition = (id, pnl) => {
     setBalance(prev => Number((prev + pnl).toFixed(2)));
     setPositions(prev => prev.filter(p => p.id !== id));
-    setStatusMsg(`✅ تم إغلاق الصفقة ${reason}. PnL: ${pnl >= 0 ? '+' : ''}$${pnl}`);
-    setTimeout(() => setStatusMsg(''), 4000);
+    setStatusMsg(`✅ تم إغلاق الصفقة بنجاح: ${pnl >= 0 ? '+' : ''}$${pnl}`);
+    setTimeout(() => setStatusMsg(''), 3000);
+  };
+
+  const handleResetAccount = () => {
+    if (window.confirm('هل أنت تأكد من إعادة ضبط الحساب ومسح الصفقات والأرباح؟')) {
+      localStorage.removeItem('bot_positions');
+      localStorage.removeItem('bot_balance');
+      setBalance(10000.00);
+      setPositions([]);
+      setStatusMsg('🔄 تم إعادة ضبط المحفظة بنجاح');
+      setTimeout(() => setStatusMsg(''), 3000);
+    }
   };
 
   const currentPairPositions = positions.filter(p => p.symbolKey === selectedPair);
 
   return (
     <div style={styles.container}>
-      
-      {/* نمط السوق */}
+      {/* اختيار نمط السوق */}
       <div style={styles.marketTypeBar}>
         <button
           style={{ ...styles.marketTypeBtn, backgroundColor: marketType === 'SPOT' ? '#00f5d4' : '#0b111e', color: marketType === 'SPOT' ? '#05080f' : '#8a99ad' }}
@@ -238,12 +279,12 @@ export default function App() {
             onClick={() => setSelectedPair(key)}
           >
             <div style={{ fontSize: '11px', fontWeight: 'bold', color: item.color }}>{item.name}</div>
-            <div style={{ fontSize: '10px', color: '#fff' }}>${item.price ? item.price.toLocaleString() : '...' }</div>
+            <div style={{ fontSize: '10px', color: '#fff' }}>${item.price ? item.price.toLocaleString() : '...'}</div>
           </button>
         ))}
       </div>
 
-      {/* إطارات الوقت (فريمات) */}
+      {/* الفريمات الزمنيّة */}
       <div style={styles.timeframeBar}>
         {['1m', '5m', '15m', '1h'].map(tf => (
           <button
@@ -256,19 +297,18 @@ export default function App() {
         ))}
       </div>
 
-      {/* المحفظة */}
+      {/* ملخص المحفظة وحالة الحساب */}
       <div style={styles.headerCard}>
         <div>
-          <div style={styles.subText}>الرصيد المتاح</div>
+          <div style={styles.subText}>الرصيد المتاح (محفوظ)</div>
           <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#00f5d4' }}>${balance.toLocaleString()} USD</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={styles.subText}>حالة السوق</div>
-          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#00f5d4' }}>🟢 متصل حياً (Live Stream)</div>
+          <button style={styles.resetBtn} onClick={handleResetAccount}>🔄 إعادة ضبط</button>
         </div>
       </div>
 
-      {/* الشارت المحدث لحظياً */}
+      {/* الشارت */}
       <div style={styles.chartWrapper}>
         <div style={styles.chartHeader}>
           <span>📊 شارت تفاعلي ({currentPairObj.name})</span>
@@ -277,7 +317,7 @@ export default function App() {
         <div ref={chartContainerRef} style={{ width: '100%', height: '280px' }} />
       </div>
 
-      {/* الصفقات النشطة */}
+      {/* قائمة الصفقات النشطة */}
       {currentPairPositions.length > 0 && (
         <div style={styles.activePositionsCard}>
           <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#fca311', marginBottom: '6px' }}>💼 الصفقات النشطة:</div>
@@ -291,14 +331,12 @@ export default function App() {
                   {pos.pnl >= 0 ? '+' : ''}${pos.pnl} USD
                 </span>
               </div>
-
               {(pos.stopLoss || pos.takeProfit) && (
                 <div style={{ fontSize: '10px', color: '#8a99ad', display: 'flex', gap: '10px', marginBottom: '4px' }}>
                   {pos.stopLoss && <span>🛑 الوقف: <b style={{ color: '#ef4444' }}>${pos.stopLoss}</b></span>}
                   {pos.takeProfit && <span>🎯 الهدف: <b style={{ color: '#22c55e' }}>${pos.takeProfit}</b></span>}
                 </div>
               )}
-
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
                 <button style={styles.closeBtnLarge} onClick={() => handleClosePosition(pos.id, pos.pnl)}>إغلاق الصفقة</button>
               </div>
@@ -307,7 +345,7 @@ export default function App() {
         </div>
       )}
 
-      {/* لوحة التحكم بالتداول اليدوي */}
+      {/* لوحة التحكم بالتداول */}
       <div style={styles.card}>
         {marketType === 'FUTURES' && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -347,20 +385,11 @@ export default function App() {
         </div>
       </div>
 
-      {/* دمج لوحة الذكاء الاصطناعي لتوليد الإشارات والتداول الآلي */}
-      <div style={{ marginTop: '12px' }}>
-        <TradingPanel 
-          currentPrice={currentPairObj.price} 
-          onExecuteTrade={handleAiExecute} 
-        />
-      </div>
-
       {statusMsg && <div style={styles.statusBanner}>{statusMsg}</div>}
 
       <div style={styles.footer}>
-        Stable Chart Live Engine | Owner ID: 966607076
+        Persistent Live Engine | Continuous State Active
       </div>
-
     </div>
   );
 }
@@ -373,8 +402,9 @@ const styles = {
   pairBtn: { flex: '0 0 auto', padding: '6px 10px', border: '1px solid', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', minWidth: '80px' },
   timeframeBar: { display: 'flex', gap: '6px', marginBottom: '8px', backgroundColor: '#0b111e', padding: '6px', borderRadius: '8px', border: '1px solid #1c2841' },
   tfBtn: { flex: 1, padding: '4px', border: '1px solid #1c2841', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', textAlign: 'center' },
-  headerCard: { display: 'flex', justifyContent: 'space-between', backgroundColor: '#0b111e', border: '1px solid #1c2841', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
+  headerCard: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0b111e', border: '1px solid #1c2841', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
   subText: { fontSize: '9px', color: '#8a99ad' },
+  resetBtn: { backgroundColor: '#1c2841', color: '#ef4444', border: '1px solid #3a4b6c', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' },
   chartWrapper: { backgroundColor: '#0b111e', border: '1px solid #1c2841', borderRadius: '10px', padding: '4px', marginBottom: '8px', overflow: 'hidden' },
   chartHeader: { display: 'flex', justifyContent: 'space-between', padding: '4px 8px', fontSize: '11px', color: '#4cc9f0', fontWeight: 'bold' },
   activePositionsCard: { backgroundColor: '#0b111e', border: '1px solid #4cc9f0', borderRadius: '10px', padding: '10px', marginBottom: '8px' },
@@ -384,6 +414,6 @@ const styles = {
   selectInput: { width: '100%', padding: '6px', backgroundColor: '#05080f', border: '1px solid #1c2841', borderRadius: '4px', color: '#fff', fontSize: '11px', textAlign: 'center', boxSizing: 'border-box', marginTop: '2px' },
   tradeBtn: { flex: 1, padding: '10px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
   closeBtnLarge: { backgroundColor: '#f72585', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' },
-  statusBanner: { backgroundColor: '#4cc9f0', color: '#05080f', padding: '6px', borderRadius: '6px', fontSize: '10px', textAlign: 'center', fontWeight: 'bold', marginTop: '8px' },
+  statusBanner: { backgroundColor: '#4cc9f0', color: '#05080f', padding: '6px', borderRadius: '6px', fontSize: '10px', textAlign: 'center', fontWeight: 'bold', marginBottom: '8px' },
   footer: { textAlign: 'center', color: '#3a4b6c', fontSize: '9px', marginTop: '8px' }
 };
