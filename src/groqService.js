@@ -1,4 +1,4 @@
-// src/groqService.js - خدمة الاتصال المباشر بـ Groq API
+// src/groqService.js - خدمة الاتصال بـ Groq API باستخدام النموذج المعتمد
 
 const GROQ_API_KEY = "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";
 
@@ -55,7 +55,7 @@ export async function getGroqTradingDecision(candles, currentPrice) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
+        model: "openai/gpt-oss-120b", // ✅ النموذج المعتمد المتاح في حسابك
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
