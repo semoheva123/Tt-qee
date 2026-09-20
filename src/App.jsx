@@ -1,4 +1,4 @@
-// src/App.jsx - تطبيق التداول الرئيسي المربوط ببيانات حية ومباشرة
+// src/App.jsx - تطبيق التداول الرئيسي المربوط ببيانات حية ومباشرة (نسخة خالية من الأخطاء)
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createChart } from 'lightweight-charts';
@@ -56,7 +56,6 @@ export default function App() {
   const [isListeningVoice, setIsListeningVoice] = useState(false);
   const [battleOpponent, setBattleOpponent] = useState(null);
   const [battleResult, setBattleResult] = useState(null);
-  const [quizAnswered, setQuizAnswered] = useState(false);
 
   const [copyTraders] = useState([
     { id: 1, name: 'Kurd_Whale 🐋', roi: '+412%', winRate: '93%', copiers: 1540, pair: 'BTCUSD', side: 'LONG' },
@@ -64,7 +63,7 @@ export default function App() {
     { id: 3, name: 'Crypto_Sniper ⚡', roi: '+165%', winRate: '87%', copiers: 610, pair: 'ETHUSD', side: 'LONG' }
   ]);
 
-  const [userBadges, setUserBadges] = useState(['صائد الصفقات 🏹', 'مبتدئ طموح 🌱', 'محلل مؤسسي 🏛️']);
+  const [userBadges] = useState(['صائد الصفقات 🏹', 'مبتدئ طموح 🌱', 'محلل مؤسسي 🏛️']);
 
   const chartContainerRef = useRef(null);
   const chartInstanceRef = useRef(null);
@@ -74,11 +73,12 @@ export default function App() {
   const isDataReadyRef = useRef(false);
   const priceLinesRef = useRef([]);
 
+  // ✅ إصلاح رمز الفضة XAGUSD لمنع جلب أسعار الذهب وخلط البيانات
   const [marketData, setMarketData] = useState({
     BTCUSD: { name: 'BTC / USDT', symbolApi: 'BTCUSDT', price: 81300.00, color: '#f7931a' },
     ETHUSD: { name: 'ETH / USDT', symbolApi: 'ETHUSDT', price: 2634.00, color: '#627eea' },
     XAUUSD: { name: 'الذهب (PAXG)', symbolApi: 'PAXGUSDT', price: 2750.00, color: '#ffd700' },
-    XAGUSD: { name: 'الفضة (XAG)', symbolApi: 'PAXGUSDT', price: 32.50, color: '#e2e8f0' }
+    XAGUSD: { name: 'الفضة (XAG)', symbolApi: null, price: 32.50, color: '#e2e8f0' }
   });
 
   const currentPairObj = marketData[selectedPair];
@@ -126,7 +126,10 @@ export default function App() {
 
   // 3. جلب عمق السوق الحقيقي (Binance Depth API)
   useEffect(() => {
-    if (!currentPairObj?.symbolApi) return;
+    if (!currentPairObj?.symbolApi) {
+      setOrderBook({ bids: [], asks: [] });
+      return;
+    }
     const fetchOrderBook = async () => {
       try {
         const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${currentPairObj.symbolApi}&limit=5`);
@@ -271,7 +274,7 @@ export default function App() {
     });
   }, [positions, selectedPair]);
 
-  // ✅ جلب الشموع (تم إصلاح الوميض بحصر الاعتماديات على [selectedPair, timeframe])
+  // جلب الشموع
   useEffect(() => {
     if (!seriesRef.current) return;
 
@@ -285,6 +288,8 @@ export default function App() {
 
       try {
         const symbol = marketData[selectedPair].symbolApi;
+        if (!symbol) throw new Error('No API symbol available');
+
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=100`);
         if (!res.ok) throw new Error('Binance error');
         const rawData = await res.json();
@@ -324,7 +329,7 @@ export default function App() {
       isMounted = false;
       isDataReadyRef.current = false;
     };
-  }, [selectedPair, timeframe]);
+  }, [selectedPair, timeframe, generateFallbackCandles]);
 
   // البث المباشر WebSocket
   useEffect(() => {
@@ -386,7 +391,7 @@ export default function App() {
     };
   }, [selectedPair, timeframe, currentPairObj?.symbolApi]);
 
-  // حساب أرباح/خسائر الصفقات المفتوحة
+  // ✅ إصلاح معادلة حساب أرباح/خسائر الصفقات المفتوحة (PnL Calculation Corrected)
   useEffect(() => {
     const currentP = currentPairObj?.price;
     if (!currentP || positions.length === 0) return;
@@ -397,9 +402,12 @@ export default function App() {
     const updatedPositions = positions.map(pos => {
       if (pos.symbolKey !== selectedPair) return pos;
 
-      const diff = pos.side === 'LONG' || pos.marketType === 'SPOT' ? currentP - pos.entryPrice : pos.entryPrice - currentP;
-      const basePnl = diff * pos.qty;
-      const pnlVal = pos.marketType === 'FUTURES' ? basePnl * pos.leverage : basePnl;
+      // 1. نسبة التغير في السعر
+      const priceRatio = (currentP - pos.entryPrice) / pos.entryPrice;
+      const direction = pos.side === 'LONG' || pos.marketType === 'SPOT' ? 1 : -1;
+
+      // 2. حساب الـ PnL بالدولار بشكل صحيح اعتماداً على مبلغ الصفقة والرافعة
+      const pnlVal = priceRatio * direction * pos.qty * (pos.marketType === 'FUTURES' ? pos.leverage : 1);
 
       const isHitSL = pos.stopLoss && ((pos.side === 'LONG' && currentP <= pos.stopLoss) || (pos.side === 'SHORT' && currentP >= pos.stopLoss));
       const isHitTP = pos.takeProfit && ((pos.side === 'LONG' && currentP >= pos.takeProfit) || (pos.side === 'SHORT' && currentP <= pos.takeProfit));
@@ -422,13 +430,13 @@ export default function App() {
     }
   }, [marketData, selectedPair, currentPairObj?.price, positions]);
 
-  // ✅ استدعات وتنفيذ تحليل وتداول Groq AI المباشر
+  // استدعاء وتنفيذ تحليل وتداول Groq AI المباشر
   const handleRunAiAnalysis = async () => {
     const currentP = currentPairObj?.price;
     if (!currentP) return;
 
     setIsAnalyzing(true);
-    setStatusMsg(`🧠 جاري تحليل الشموع عبر نموذج openai/gpt-oss-120b...`);
+    setStatusMsg(`🧠 جاري تحليل الشموع عبر نموذج Groq AI...`);
 
     try {
       const decision = await getGroqTradingDecision(candlesDataRef.current, currentP);
@@ -445,7 +453,6 @@ export default function App() {
 
       setStatusMsg(`💡 قرار الذكاء الاصطناعي: ${action}`);
 
-      // تنفيذ الصفقة تلقائياً إذا كان التداول الآلي مفعل
       if (autoTradeAI && (action === 'BUY' || action === 'SELL')) {
         handleTrade(action === 'BUY' ? 'LONG' : 'SHORT', {
           stopLoss: decision.stopLoss > 0 ? decision.stopLoss : null,
@@ -655,7 +662,7 @@ export default function App() {
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'news' ? '#eab308' : 'transparent', color: activeTab === 'news' ? '#eab308' : '#64748b' }} onClick={() => setActiveTab('news')}>📰 الأخبار (حي)</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'positions' ? '#00f5d4' : 'transparent', color: activeTab === 'positions' ? '#00f5d4' : '#64748b' }} onClick={() => setActiveTab('positions')}>💼 صفقاتي ({positions.length})</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'battle' ? '#ef4444' : 'transparent', color: activeTab === 'battle' ? '#ef4444' : '#64748b' }} onClick={() => setActiveTab('battle')}>⚔️ معارك PvP</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'vault' ? '#10b981' : 'transparent', color: activeTab === 'vault' ? '#10b981' : '#64748b' }} onClick={() => setActiveTab('vault')}>🏛️ الصندوق</button>
+        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'vault' ? '#10b981' : 'transparent', color: activeTab === 'vault' ? '#10b981' : '#64748b' }} onClick={() => setActiveTab('vault')}>🏛️ الصندوق & Prop Firm</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'copy' ? '#f59e0b' : 'transparent', color: activeTab === 'copy' ? '#f59e0b' : '#64748b' }} onClick={() => setActiveTab('copy')}>👥 نسخ</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'calc' ? '#3b82f6' : 'transparent', color: activeTab === 'calc' ? '#3b82f6' : '#64748b' }} onClick={() => setActiveTab('calc')}>🧮 الحاسبة</button>
       </div>
@@ -707,7 +714,7 @@ export default function App() {
       {activeTab === 'ai' && (
         <div style={styles.tabContentCard}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#a855f7' }}>openai/gpt-oss-120b Engine</span>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#a855f7' }}>Groq Quant AI Engine</span>
             <label style={{ fontSize: '10px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <input type="checkbox" checked={autoTradeAI} onChange={(e) => setAutoTradeAI(e.target.checked)} />
               تداول آلي تلقائي
@@ -736,35 +743,41 @@ export default function App() {
         </div>
       )}
 
-      {/* 📊 عمق السوق الحقيقي (Binance Live OrderBook) */}
+      {/* عمق السوق الحقيقي */}
       {activeTab === 'dom' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#00f5d4', marginBottom: '10px' }}>📊 عمق السوق الحي (Binance OrderBook)</div>
-          <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '6px' }}>أوامر البيع الكبرى (Asks):</div>
-          <div style={styles.domBoxRed}>
-            {orderBook.asks.map((ask, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>${ask[0]}</span>
-                <span>{ask[1]} الكمية</span>
+          {orderBook.asks.length === 0 ? (
+            <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'center', padding: '15px' }}>عمق السوق المباشر غير متاح لهذا الزوج حالياً</div>
+          ) : (
+            <>
+              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '6px' }}>أوامر البيع الكبرى (Asks):</div>
+              <div style={styles.domBoxRed}>
+                {orderBook.asks.map((ask, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>${ask[0]}</span>
+                    <span>{ask[1]} الكمية</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div style={{ textAlign: 'center', margin: '8px 0', fontSize: '13px', fontWeight: 'bold', color: '#fff' }}>
-            السعر المباشر: ${currentPairObj.price}
-          </div>
-          <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '6px' }}>أوامر الشراء الكبرى (Bids):</div>
-          <div style={styles.domBoxGreen}>
-            {orderBook.bids.map((bid, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>${bid[0]}</span>
-                <span>{bid[1]} الكمية</span>
+              <div style={{ textAlign: 'center', margin: '8px 0', fontSize: '13px', fontWeight: 'bold', color: '#fff' }}>
+                السعر المباشر: ${currentPairObj.price}
               </div>
-            ))}
-          </div>
+              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '6px' }}>أوامر الشراء الكبرى (Bids):</div>
+              <div style={styles.domBoxGreen}>
+                {orderBook.bids.map((bid, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>${bid[0]}</span>
+                    <span>{bid[1]} الكمية</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* 🌐 مؤشر الخوف والطمع الحقيقي */}
+      {/* مؤشر الخوف والطمع الحقيقي */}
       {activeTab === 'sentiment' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#3b82f6', marginBottom: '10px' }}>🌐 مؤشر معنويات السوق المباشر</div>
@@ -783,7 +796,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 📰 الأخبار الاقتصادية الحية */}
+      {/* الأخبار الاقتصادية الحية */}
       {activeTab === 'news' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#eab308', marginBottom: '10px' }}>📰 بث الأخبار الاقتصادية المباشر</div>
@@ -819,6 +832,10 @@ export default function App() {
                     {pos.pnl >= 0 ? '+' : ''}${pos.pnl} USD
                   </span>
                 </div>
+                <div style={{ fontSize: '10px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span>سعر الدخول: ${pos.entryPrice}</span>
+                  <span>المبلغ: ${pos.qty}</span>
+                </div>
                 <button style={styles.closePosBtn} onClick={() => handleClosePosition(pos.id, pos.pnl)}>إغلاق الصفقة</button>
               </div>
             ))
@@ -826,7 +843,7 @@ export default function App() {
         </div>
       )}
 
-      {/* باقي التبويبات التفاعلية */}
+      {/* معارك PvP */}
       {activeTab === 'battle' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ef4444', marginBottom: '10px' }}>⚔️ معارك PvP</div>
@@ -840,9 +857,10 @@ export default function App() {
         </div>
       )}
 
+      {/* الصندوق وتحدي شركات التمويل */}
       {activeTab === 'vault' && (
         <div style={styles.tabContentCard}>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#10b981', marginBottom: '10px' }}>🏛️ صندوق الاستثمار</div>
+          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#10b981', marginBottom: '10px' }}>🏛️ الصندوق & تحدي Prop Firm</div>
           <div style={styles.vaultCard}>
             <div style={{ fontSize: '10px', color: '#94a3b8' }}>السيولة المدارة:</div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#10b981', marginTop: '4px' }}>${vaultBalance.toLocaleString()} USD</div>
@@ -853,9 +871,27 @@ export default function App() {
               ➕ استثمار 500$
             </button>
           </div>
+
+          {/* ربط متغيرات Prop Firm بواجهة مستخدم تفاعلية */}
+          <div style={{ marginTop: '12px', fontSize: '12px', fontWeight: 'bold', color: '#cbd5e1' }}>📊 شروط تحدي التمويل (Prop Firm Rules):</div>
+          <div style={{ ...styles.propStatsGrid, marginTop: '8px' }}>
+            <div style={styles.propStatItem}>
+              <span style={{ fontSize: '9px', color: '#94a3b8' }}>أقصى خسارة يومية</span>
+              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#ef4444', marginTop: '2px' }}>${propMaxDailyLoss}</span>
+            </div>
+            <div style={styles.propStatItem}>
+              <span style={{ fontSize: '9px', color: '#94a3b8' }}>أقصى خسارة كليّة</span>
+              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#ef4444', marginTop: '2px' }}>${propMaxOverallLoss}</span>
+            </div>
+            <div style={{ ...styles.propStatItem, gridColumn: 'span 2' }}>
+              <span style={{ fontSize: '9px', color: '#94a3b8' }}>الهدف المطلوب تحقيقُه</span>
+              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#10b981', marginTop: '2px' }}>${propTarget}</span>
+            </div>
+          </div>
         </div>
       )}
 
+      {/* نسخ الصفقات */}
       {activeTab === 'copy' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#f59e0b', marginBottom: '10px' }}>👥 نسخ الصفقات</div>
@@ -876,6 +912,7 @@ export default function App() {
         </div>
       )}
 
+      {/* حاسبة المخاطر */}
       {activeTab === 'calc' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#3b82f6', marginBottom: '12px' }}>🧮 حاسبة المخاطرة</div>
@@ -889,6 +926,10 @@ export default function App() {
           </div>
           <div style={styles.calcResultBox}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8' }}>مبلغ المخاطرة:</span>
+              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#ef4444' }}>${calculatedRiskAmount}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px' }}>
               <span style={{ fontSize: '11px', color: '#94a3b8' }}>العقد المقترح:</span>
               <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#00f5d4' }}>{calculatedLotSize} Lot</span>
             </div>
