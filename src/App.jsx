@@ -8,7 +8,7 @@ export default function App() {
   const [tradeAmount, setTradeAmount] = useState('100');
   const [leverage, setLeverage] = useState('20');
   const [statusMsg, setStatusMsg] = useState('');
-  const [activeTab, setActiveTab] = useState('chart'); // chart | positions | ai | news | calc | signals | prop
+  const [activeTab, setActiveTab] = useState('chart'); // chart | signals | positions | ai | calc | news | prop
   const [activeSource, setActiveSource] = useState('Binance');
 
   // حالة الذكاء الاصطناعي والتداول الآلي
@@ -21,11 +21,9 @@ export default function App() {
   const [calcStopLossPips, setCalcStopLossPips] = useState('50');
 
   // حالة تحدي Prop Firm
-  const [isPropActive, setIsPropActive] = useState(false);
-  const [propInitialBalance, setPropInitialBalance] = useState(10000);
-  const [propMaxDailyLoss, setPropMaxDailyLoss] = useState(500); // 5%
-  const [propMaxOverallLoss, setPropMaxOverallLoss] = useState(1000); // 10%
-  const [propTarget, setPropTarget] = useState(1000); // 10%
+  const [propMaxDailyLoss] = useState(500); // 5%
+  const [propMaxOverallLoss] = useState(1000); // 10%
+  const [propTarget] = useState(1000); // 10%
 
   // 1. استرجاع الرصيد والصفقات من localStorage
   const [balance, setBalance] = useState(() => {
@@ -45,10 +43,10 @@ export default function App() {
   const isDataReadyRef = useRef(false);
 
   const [marketData, setMarketData] = useState({
-    BTCUSD: { name: 'BTC / USDT', symbolApi: 'BTCUSDT', coinGeckoId: 'bitcoin', price: 81300.00, change: '+2.4%', color: '#f7931a' },
-    ETHUSD: { name: 'ETH / USDT', symbolApi: 'ETHUSDT', coinGeckoId: 'ethereum', price: 2634.00, change: '-0.8%', color: '#627eea' },
-    XAUUSD: { name: 'الذهب (XAU)', symbolApi: 'PAXGUSDT', coinGeckoId: 'pax-gold', price: 4366.72, change: '+0.5%', color: '#ffd700' },
-    XAGUSD: { name: 'الفضة (XAG)', symbolApi: 'LTCUSDT', coinGeckoId: 'litecoin', price: 58.28, change: '+1.1%', color: '#e2e8f0' }
+    BTCUSD: { name: 'BTC / USDT', symbolApi: 'BTCUSDT', coinGeckoId: 'bitcoin', price: 81300.00, color: '#f7931a' },
+    ETHUSD: { name: 'ETH / USDT', symbolApi: 'ETHUSDT', coinGeckoId: 'ethereum', price: 2634.00, color: '#627eea' },
+    XAUUSD: { name: 'الذهب (XAU)', symbolApi: 'PAXGUSDT', coinGeckoId: 'pax-gold', price: 4366.72, color: '#ffd700' },
+    XAGUSD: { name: 'الفضة (XAG)', symbolApi: 'LTCUSDT', coinGeckoId: 'litecoin', price: 58.28, color: '#e2e8f0' }
   });
 
   const currentPairObj = marketData[selectedPair];
@@ -63,8 +61,8 @@ export default function App() {
 
   // توصيات القناة (TRADING KURD Sync)
   const channelSignals = [
-    { id: 101, pairKey: 'BTCUSD', pairName: 'BTC/USDT', side: 'LONG', entry: 81200, sl: 80500, tp: 82500, time: 'منذ 10 دقائق', status: 'نشطة' },
-    { id: 102, pairKey: 'XAUUSD', pairName: 'XAU/USD', side: 'SHORT', entry: 4370, sl: 4385, tp: 4340, time: 'منذ 35 دقيقة', status: 'نشطة' }
+    { id: 101, pairKey: 'BTCUSD', pairName: 'BTC/USDT', side: 'LONG', entry: 81200, sl: 80500, tp: 82500, time: 'منذ 10 دقائق' },
+    { id: 102, pairKey: 'XAUUSD', pairName: 'XAU/USD', side: 'SHORT', entry: 4370, sl: 4385, tp: 4340, time: 'منذ 35 دقيقة' }
   ];
 
   // مولد بيانات احتياطي
@@ -491,7 +489,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* شريط التبويبات الرئيسي (الأقسام المضافة) */}
+      {/* شريط التبويبات الرئيسي */}
       <div style={styles.mainTabsScroll}>
         <button 
           style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'chart' ? '#00f5d4' : 'transparent', color: activeTab === 'chart' ? '#00f5d4' : '#64748b' }}
@@ -537,50 +535,48 @@ export default function App() {
         </button>
       </div>
 
-      {/* تبويب 1: الشارت والتداول المباشر */}
-      {activeTab === 'chart' && (
-        <>
-          <div style={styles.chartWrapper}>
-            <div style={styles.chartHeader}>
-              <span style={{ color: '#cbd5e1' }}>{currentPairObj.name} • {timeframe.toUpperCase()}</span>
-              <span style={{ color: '#00f5d4', fontWeight: 'bold' }}>${currentPairObj.price}</span>
-            </div>
-            <div ref={chartContainerRef} style={{ width: '100%', height: '270px' }} />
+      {/* تبويب 1: الشارت والتداول المباشر (باستخدام display لتفادي فقدان مرجع العنصر عند التنقل) */}
+      <div style={{ display: activeTab === 'chart' ? 'block' : 'none' }}>
+        <div style={styles.chartWrapper}>
+          <div style={styles.chartHeader}>
+            <span style={{ color: '#cbd5e1' }}>{currentPairObj.name} • {timeframe.toUpperCase()}</span>
+            <span style={{ color: '#00f5d4', fontWeight: 'bold' }}>${currentPairObj.price}</span>
           </div>
+          <div ref={chartContainerRef} style={{ width: '100%', height: '270px' }} />
+        </div>
 
-          <div style={styles.tradePanel}>
-            {marketType === 'FUTURES' && (
-              <div style={styles.inputsRow}>
-                <div style={{ flex: 1 }}>
-                  <span style={styles.fieldLabel}>الرافعة المالية</span>
-                  <select style={styles.cyberSelect} value={leverage} onChange={(e) => setLeverage(e.target.value)}>
-                    <option value="1">1x</option>
-                    <option value="10">10x</option>
-                    <option value="20">20x</option>
-                    <option value="50">50x</option>
-                    <option value="100">100x</option>
-                  </select>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <span style={styles.fieldLabel}>المبلغ (USD)</span>
-                  <input type="number" style={styles.cyberInput} value={tradeAmount} onChange={(e) => setTradeAmount(e.target.value)} />
-                </div>
+        <div style={styles.tradePanel}>
+          {marketType === 'FUTURES' && (
+            <div style={styles.inputsRow}>
+              <div style={{ flex: 1 }}>
+                <span style={styles.fieldLabel}>الرافعة المالية</span>
+                <select style={styles.cyberSelect} value={leverage} onChange={(e) => setLeverage(e.target.value)}>
+                  <option value="1">1x</option>
+                  <option value="10">10x</option>
+                  <option value="20">20x</option>
+                  <option value="50">50x</option>
+                  <option value="100">100x</option>
+                </select>
               </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-              <button style={styles.buyBtn} onClick={() => handleTrade('LONG')}>
-                {marketType === 'SPOT' ? 'شراء فوري 🟢' : 'شراء (LONG) 🟢'}
-              </button>
-              {marketType === 'FUTURES' && (
-                <button style={styles.sellBtn} onClick={() => handleTrade('SHORT')}>
-                  بيع (SHORT) 🔴
-                </button>
-              )}
+              <div style={{ flex: 1 }}>
+                <span style={styles.fieldLabel}>المبلغ (USD)</span>
+                <input type="number" style={styles.cyberInput} value={tradeAmount} onChange={(e) => setTradeAmount(e.target.value)} />
+              </div>
             </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+            <button style={styles.buyBtn} onClick={() => handleTrade('LONG')}>
+              {marketType === 'SPOT' ? 'شراء فوري 🟢' : 'شراء (LONG) 🟢'}
+            </button>
+            {marketType === 'FUTURES' && (
+              <button style={styles.sellBtn} onClick={() => handleTrade('SHORT')}>
+                بيع (SHORT) 🔴
+              </button>
+            )}
           </div>
-        </>
-      )}
+        </div>
+      </div>
 
       {/* تبويب 2: توصيات القناة TRADING KURD Sync */}
       {activeTab === 'signals' && (
@@ -605,6 +601,7 @@ export default function App() {
                 style={styles.applySignalBtn}
                 onClick={() => {
                   setSelectedPair(sig.pairKey);
+                  setActiveTab('chart');
                   handleTrade(sig.side, { stopLoss: sig.sl, takeProfit: sig.tp });
                 }}
               >
@@ -926,7 +923,7 @@ const styles = {
   },
   chartWrapper: {
     backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    border: '1px solid rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
     borderRadius: '14px',
     padding: '8px',
     marginBottom: '10px',
@@ -939,7 +936,7 @@ const styles = {
   },
   tradePanel: {
     backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    border: '1px solid rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
     borderRadius: '14px',
     padding: '12px',
   },
