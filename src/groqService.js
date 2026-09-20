@@ -1,4 +1,4 @@
-// groqService.js - خدمة الاتصال المباشر بـ Groq API
+// src/groqService.js - خدمة الاتصال المباشر بـ Groq API
 
 const GROQ_API_KEY = "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";
 
