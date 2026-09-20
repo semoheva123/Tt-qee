@@ -1,4 +1,4 @@
-// src/App.jsx - المكون الرئيسي للمنصة
+// src/App.jsx - تطبيق التداول الرئيسي المربوط ببيانات حية ومباشرة
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createChart } from 'lightweight-charts';
@@ -24,10 +24,15 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('chart'); 
   const [activeSource, setActiveSource] = useState('Binance API Pro');
 
+  // بيانات حية من شبكات خارجيّة (Real Dynamic Data)
+  const [orderBook, setOrderBook] = useState({ bids: [], asks: [] });
+  const [sentimentData, setSentimentData] = useState({ value: '50', classification: 'Neutral' });
+  const [liveNews, setLiveNews] = useState([]);
+
   // حالة الذكاء الاصطناعي
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [autoTradeAI, setAutoTradeAI] = useState(false);
+  const [autoTradeAI, setAutoTradeAI] = useState(true);
 
   // حاسبة المخاطر
   const [calcRiskPercent, setCalcRiskPercent] = useState('1');
@@ -70,25 +75,77 @@ export default function App() {
   const priceLinesRef = useRef([]);
 
   const [marketData, setMarketData] = useState({
-    BTCUSD: { name: 'BTC / USDT', symbolApi: 'BTCUSDT', coinGeckoId: 'bitcoin', price: 81300.00, color: '#f7931a' },
-    ETHUSD: { name: 'ETH / USDT', symbolApi: 'ETHUSDT', coinGeckoId: 'ethereum', price: 2634.00, color: '#627eea' },
-    XAUUSD: { name: 'الذهب (PAXG)', symbolApi: 'PAXGUSDT', coinGeckoId: 'pax-gold', price: 2750.00, color: '#ffd700' },
-    XAGUSD: { name: 'الفضة (XAG)', symbolApi: 'PAXGUSDT', coinGeckoId: 'silver', price: 32.50, color: '#e2e8f0' }
+    BTCUSD: { name: 'BTC / USDT', symbolApi: 'BTCUSDT', price: 81300.00, color: '#f7931a' },
+    ETHUSD: { name: 'ETH / USDT', symbolApi: 'ETHUSDT', price: 2634.00, color: '#627eea' },
+    XAUUSD: { name: 'الذهب (PAXG)', symbolApi: 'PAXGUSDT', price: 2750.00, color: '#ffd700' },
+    XAGUSD: { name: 'الفضة (XAG)', symbolApi: 'PAXGUSDT', price: 32.50, color: '#e2e8f0' }
   });
 
   const currentPairObj = marketData[selectedPair];
 
-  const economicNews = [
-    { id: 1, title: 'قرار معدل الفائدة للبنك الفيدرالي الأمريكي (FOMC)', currency: 'USD', impact: 'HIGH', time: '21:00' },
-    { id: 2, title: 'مؤشر أسعار المستهلكين الأساسي السنوي (CPI)', currency: 'USD', impact: 'HIGH', time: '15:30' },
-    { id: 3, title: 'خطاب رئيس البنك المركزي الأوروبي (ECB)', currency: 'EUR', impact: 'MEDIUM', time: '12:00' },
-    { id: 4, title: 'تقرير مخزون النفط الخام الأمريكي الأسبوعي', currency: 'USD', impact: 'MEDIUM', time: '17:30' }
-  ];
+  // 1. جلب الأخبار الحية الحقيقية (CryptoCompare API)
+  useEffect(() => {
+    const fetchRealNews = async () => {
+      try {
+        const res = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN');
+        const data = await res.json();
+        if (data.Data && Array.isArray(data.Data)) {
+          const formattedNews = data.Data.slice(0, 5).map((n, idx) => ({
+            id: idx + 1,
+            title: n.title,
+            source: n.source_info.name,
+            time: new Date(n.published_on * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }));
+          setLiveNews(formattedNews);
+        }
+      } catch (e) {
+        console.warn("خطأ في جلب الأخبار:", e);
+      }
+    };
+    fetchRealNews();
+  }, []);
 
-  const channelSignals = [
-    { id: 101, pairKey: 'BTCUSD', pairName: 'BTC/USDT', side: 'LONG', entry: 81200, sl: 80500, tp: 82500, time: 'منذ دقيقتين' },
-    { id: 102, pairKey: 'XAUUSD', pairName: 'XAU/USD', side: 'SHORT', entry: 2750, sl: 2765, tp: 2720, time: 'منذ 15 دقيقة' }
-  ];
+  // 2. جلب مؤشر الخوف والطمع الحقيقي (Alternative.me API)
+  useEffect(() => {
+    const fetchSentiment = async () => {
+      try {
+        const res = await fetch('https://api.alternative.me/fng/');
+        const data = await res.json();
+        if (data.data && data.data[0]) {
+          setSentimentData({
+            value: data.data[0].value,
+            classification: data.data[0].value_classification
+          });
+        }
+      } catch (e) {
+        console.warn("خطأ في جلب مؤشر الخوف والطمع:", e);
+      }
+    };
+    fetchSentiment();
+  }, []);
+
+  // 3. جلب عمق السوق الحقيقي (Binance Depth API)
+  useEffect(() => {
+    if (!currentPairObj?.symbolApi) return;
+    const fetchOrderBook = async () => {
+      try {
+        const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${currentPairObj.symbolApi}&limit=5`);
+        const data = await res.json();
+        if (data.bids && data.asks) {
+          setOrderBook({
+            bids: data.bids.map(b => [parseFloat(b[0]).toFixed(2), parseFloat(b[1]).toFixed(3)]),
+            asks: data.asks.map(a => [parseFloat(a[0]).toFixed(2), parseFloat(a[1]).toFixed(3)])
+          });
+        }
+      } catch (e) {
+        console.warn("خطأ عمق السوق:", e);
+      }
+    };
+
+    fetchOrderBook();
+    const interval = setInterval(fetchOrderBook, 3000);
+    return () => clearInterval(interval);
+  }, [selectedPair, currentPairObj?.symbolApi]);
 
   const generateFallbackCandles = useCallback((basePrice) => {
     const candles = [];
@@ -166,7 +223,7 @@ export default function App() {
     };
   }, []);
 
-  // تحديث الخطوط على الشارت
+  // تحديث خطوط الصفقات على الشارت
   useEffect(() => {
     if (!seriesRef.current) return;
 
@@ -200,21 +257,21 @@ export default function App() {
 
       if (pos.stopLoss) {
         const slLine = seriesRef.current.createPriceLine({
-          price: pos.stopLoss, color: '#ef4444', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL (الوقف)',
+          price: pos.stopLoss, color: '#ef4444', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL',
         });
         priceLinesRef.current.push(slLine);
       }
 
       if (pos.takeProfit) {
         const tpLine = seriesRef.current.createPriceLine({
-          price: pos.takeProfit, color: '#10b981', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP (الهدف)',
+          price: pos.takeProfit, color: '#10b981', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP',
         });
         priceLinesRef.current.push(tpLine);
       }
     });
   }, [positions, selectedPair]);
 
-  // جلب الشموع
+  // ✅ جلب الشموع (تم إصلاح الوميض بحصر الاعتماديات على [selectedPair, timeframe])
   useEffect(() => {
     if (!seriesRef.current) return;
 
@@ -227,7 +284,7 @@ export default function App() {
       let sourceName = 'Binance API Pro';
 
       try {
-        const symbol = currentPairObj.symbolApi;
+        const symbol = marketData[selectedPair].symbolApi;
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=100`);
         if (!res.ok) throw new Error('Binance error');
         const rawData = await res.json();
@@ -244,7 +301,7 @@ export default function App() {
         }
       } catch (err) {
         sourceName = 'Engine Local';
-        formattedData = generateFallbackCandles(currentPairObj.price);
+        formattedData = generateFallbackCandles(marketData[selectedPair].price);
       }
 
       if (isMounted && formattedData.length > 0) {
@@ -267,7 +324,7 @@ export default function App() {
       isMounted = false;
       isDataReadyRef.current = false;
     };
-  }, [selectedPair, timeframe, currentPairObj, generateFallbackCandles]);
+  }, [selectedPair, timeframe]);
 
   // البث المباشر WebSocket
   useEffect(() => {
@@ -329,7 +386,7 @@ export default function App() {
     };
   }, [selectedPair, timeframe, currentPairObj?.symbolApi]);
 
-  // حساب أرباح/خسائر الصفقات والتعامل مع SL/TP
+  // حساب أرباح/خسائر الصفقات المفتوحة
   useEffect(() => {
     const currentP = currentPairObj?.price;
     if (!currentP || positions.length === 0) return;
@@ -358,26 +415,27 @@ export default function App() {
     if (closedIds.length > 0) {
       setBalance(prev => Number((prev + totalClosedPnl).toFixed(2)));
       setPositions(prev => prev.filter(p => !closedIds.includes(p.id)));
-      setStatusMsg(`🔔 تنبيه نظام: تم إغلاق صفقة تلقائياً عند مستوى الأمان (SL/TP)`);
+      setStatusMsg(`🔔 إغلاق تلقائي عند مستويات الأمان (SL/TP)`);
       setTimeout(() => setStatusMsg(''), 4000);
     } else {
       setPositions(updatedPositions);
     }
   }, [marketData, selectedPair, currentPairObj?.price, positions]);
 
-  // استدعاء الخدمة المباشرة groqService.js
+  // ✅ استدعات وتنفيذ تحليل وتداول Groq AI المباشر
   const handleRunAiAnalysis = async () => {
     const currentP = currentPairObj?.price;
     if (!currentP) return;
 
     setIsAnalyzing(true);
-    setStatusMsg(`🧠 جاري تحليل الشموع عبر groqService.js...`);
+    setStatusMsg(`🧠 جاري تحليل الشموع عبر نموذج openai/gpt-oss-120b...`);
 
     try {
       const decision = await getGroqTradingDecision(candlesDataRef.current, currentP);
+      const action = decision.action ? decision.action.toUpperCase() : 'WAIT';
 
       setAiAnalysis({
-        action: decision.action,
+        action: action,
         confidence: decision.confidence || 90,
         entryPrice: currentP,
         stopLoss: decision.stopLoss,
@@ -385,17 +443,19 @@ export default function App() {
         reason: decision.reason
       });
 
-      setStatusMsg(`💡 قرار الذكاء الاصطناعي: ${decision.action}`);
+      setStatusMsg(`💡 قرار الذكاء الاصطناعي: ${action}`);
 
-      if (autoTradeAI && (decision.action === 'BUY' || decision.action === 'SELL')) {
-        handleTrade(decision.action === 'BUY' ? 'LONG' : 'SHORT', {
+      // تنفيذ الصفقة تلقائياً إذا كان التداول الآلي مفعل
+      if (autoTradeAI && (action === 'BUY' || action === 'SELL')) {
+        handleTrade(action === 'BUY' ? 'LONG' : 'SHORT', {
           stopLoss: decision.stopLoss > 0 ? decision.stopLoss : null,
           takeProfit: decision.takeProfit > 0 ? decision.takeProfit : null
         });
+        setStatusMsg(`🚀 تم تنفيذ صفقة آلياً بناءً على قرار ${action}`);
       }
     } catch (err) {
       console.error("Groq Service Error:", err);
-      setStatusMsg('❌ فشل تحليل الذكاء الاصطناعي من groqService');
+      setStatusMsg('❌ فشل تحليل الذكاء الاصطناعي');
     } finally {
       setIsAnalyzing(false);
     }
@@ -403,7 +463,7 @@ export default function App() {
 
   const handleVoiceCommand = () => {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      setStatusMsg('🎙️ المتصفح لا يدعم التعرف الصوتي المباشر');
+      setStatusMsg('🎙️ المتصفح لا يدعم التعرف الصوتي');
       return;
     }
 
@@ -411,7 +471,7 @@ export default function App() {
     const recognition = new SpeechRecognition();
     recognition.lang = 'ar-SA';
     setIsListeningVoice(true);
-    setStatusMsg('🎙️ جاري الاستماع للأمر الصوتي (قل "شراء" أو "بيع")...');
+    setStatusMsg('🎙️ جاري الاستماع للأمر (قل "شراء" أو "بيع")...');
 
     recognition.onresult = (event) => {
       const text = event.results[0][0].transcript.toLowerCase();
@@ -419,12 +479,12 @@ export default function App() {
 
       if (text.includes('شراء') || text.includes('buy') || text.includes('صعود')) {
         handleTrade('LONG');
-        setStatusMsg(`🎙️ تم تنفيذ الأمر الصوتي: [شراء]`);
+        setStatusMsg(`🎙️ أمر صوتي: [شراء]`);
       } else if (text.includes('بيع') || text.includes('sell') || text.includes('هبوط')) {
         handleTrade('SHORT');
-        setStatusMsg(`🎙️ تم تنفيذ الأمر الصوتي: [بيع]`);
+        setStatusMsg(`🎙️ أمر صوتي: [بيع]`);
       } else {
-        setStatusMsg(`🎙️ لم نتعرف على الأمر: "${text}"`);
+        setStatusMsg(`🎙️ لم يتم التعرف على الأمر: "${text}"`);
       }
     };
 
@@ -438,12 +498,12 @@ export default function App() {
 
   const startBattle = () => {
     setBattleOpponent('Groq_Quant_Bot 🤖');
-    setStatusMsg('⚔️ بدأت معركة التداول الحية!');
+    setStatusMsg('⚔️ بدأت المعركة الحية!');
     setBattleResult(null);
 
     setTimeout(() => {
       const userWin = Math.random() > 0.35;
-      setBattleResult(userWin ? '🏆 تهانينا! حققت عائداً أعلى وفزت بجائزة 1000$!' : '❌ تفوق الخصم هذه الجولة!');
+      setBattleResult(userWin ? '🏆 فزت بالجولة وحصلت على 1000$!' : '❌ تفوق الخصم!');
       if (userWin) setBalance(prev => prev + 1000);
       setStatusMsg('⚔️ انتهت المعركة!');
     }, 3000);
@@ -473,14 +533,14 @@ export default function App() {
     };
 
     setPositions(prev => [newPos, ...prev]);
-    setStatusMsg(`🚀 تم إرسال أمر ${side} بسعر $${entry}`);
+    setStatusMsg(`🚀 تم تنفيذ أمر ${side} بسعر $${entry}`);
     setTimeout(() => setStatusMsg(''), 3000);
   };
 
   const handleClosePosition = (id, pnl) => {
     setBalance(prev => Number((prev + pnl).toFixed(2)));
     setPositions(prev => prev.filter(p => p.id !== id));
-    setStatusMsg(`✅ تم إغلاق الصفقة بربح/خسارة: ${pnl >= 0 ? '+' : ''}$${pnl}`);
+    setStatusMsg(`✅ تم إغلاق الصفقة: ${pnl >= 0 ? '+' : ''}$${pnl}`);
     setTimeout(() => setStatusMsg(''), 3000);
   };
 
@@ -590,20 +650,17 @@ export default function App() {
       <div style={styles.mainTabsScroll}>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'chart' ? '#00f5d4' : 'transparent', color: activeTab === 'chart' ? '#00f5d4' : '#64748b' }} onClick={() => setActiveTab('chart')}>📈 الشارت</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'ai' ? '#7209b7' : 'transparent', color: activeTab === 'ai' ? '#a855f7' : '#64748b' }} onClick={() => setActiveTab('ai')}>🧠 Groq AI Service</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'dom' ? '#00f5d4' : 'transparent', color: activeTab === 'dom' ? '#00f5d4' : '#64748b' }} onClick={() => setActiveTab('dom')}>📊 عمق السوق</button>
+        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'dom' ? '#00f5d4' : 'transparent', color: activeTab === 'dom' ? '#00f5d4' : '#64748b' }} onClick={() => setActiveTab('dom')}>📊 عمق السوق (حي)</button>
+        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'sentiment' ? '#3b82f6' : 'transparent', color: activeTab === 'sentiment' ? '#3b82f6' : '#64748b' }} onClick={() => setActiveTab('sentiment')}>🌐 المشاعر (حي)</button>
+        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'news' ? '#eab308' : 'transparent', color: activeTab === 'news' ? '#eab308' : '#64748b' }} onClick={() => setActiveTab('news')}>📰 الأخبار (حي)</button>
+        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'positions' ? '#00f5d4' : 'transparent', color: activeTab === 'positions' ? '#00f5d4' : '#64748b' }} onClick={() => setActiveTab('positions')}>💼 صفقاتي ({positions.length})</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'battle' ? '#ef4444' : 'transparent', color: activeTab === 'battle' ? '#ef4444' : '#64748b' }} onClick={() => setActiveTab('battle')}>⚔️ معارك PvP</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'vault' ? '#10b981' : 'transparent', color: activeTab === 'vault' ? '#10b981' : '#64748b' }} onClick={() => setActiveTab('vault')}>🏛️ الصندوق</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'sentiment' ? '#3b82f6' : 'transparent', color: activeTab === 'sentiment' ? '#3b82f6' : '#64748b' }} onClick={() => setActiveTab('sentiment')}>🌐 المشاعر</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'learn' ? '#eab308' : 'transparent', color: activeTab === 'learn' ? '#eab308' : '#64748b' }} onClick={() => setActiveTab('learn')}>🎓 كويز ربح</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'copy' ? '#f59e0b' : 'transparent', color: activeTab === 'copy' ? '#f59e0b' : '#64748b' }} onClick={() => setActiveTab('copy')}>👥 نسخ</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'signals' ? '#00f5d4' : 'transparent', color: activeTab === 'signals' ? '#00f5d4' : '#64748b' }} onClick={() => setActiveTab('signals')}>📡 القناة</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'positions' ? '#00f5d4' : 'transparent', color: activeTab === 'positions' ? '#00f5d4' : '#64748b' }} onClick={() => setActiveTab('positions')}>💼 صفقاتي</button>
         <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'calc' ? '#3b82f6' : 'transparent', color: activeTab === 'calc' ? '#3b82f6' : '#64748b' }} onClick={() => setActiveTab('calc')}>🧮 الحاسبة</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'news' ? '#eab308' : 'transparent', color: activeTab === 'news' ? '#eab308' : '#64748b' }} onClick={() => setActiveTab('news')}>📰 الأخبار</button>
-        <button style={{ ...styles.tabBtn, borderBottomColor: activeTab === 'prop' ? '#ec4899' : 'transparent', color: activeTab === 'prop' ? '#ec4899' : '#64748b' }} onClick={() => setActiveTab('prop')}>🏆 التحدي</button>
       </div>
 
-      {/* الشارت */}
+      {/* الشارت الرئيسي */}
       <div style={{ display: activeTab === 'chart' ? 'block' : 'none' }}>
         <div style={styles.chartWrapper}>
           <div style={styles.chartHeader}>
@@ -650,19 +707,15 @@ export default function App() {
       {activeTab === 'ai' && (
         <div style={styles.tabContentCard}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#a855f7' }}>🧠 Groq AI Service Direct Bridge</span>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#a855f7' }}>openai/gpt-oss-120b Engine</span>
             <label style={{ fontSize: '10px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <input type="checkbox" checked={autoTradeAI} onChange={(e) => setAutoTradeAI(e.target.checked)} />
               تداول آلي تلقائي
             </label>
           </div>
 
-          <p style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '12px', lineHeight: '1.4' }}>
-            يستخدم هذا التبويب الخدمة المدمجة <code style={{ color: '#a855f7' }}>groqService.js</code> لتحليل هيكل السعر (Price Action) والسيولة.
-          </p>
-
           <button style={styles.aiRunBtn} onClick={handleRunAiAnalysis} disabled={isAnalyzing}>
-            {isAnalyzing ? '⏳ جاري استدعاء groqService والتحليل الكمي...' : '⚡ تشغيل محرك Groq الكمي الآن'}
+            {isAnalyzing ? '⏳ جاري استدعاء Groq والتحليل الكمي...' : '⚡ تشغيل محرك Groq المباشر'}
           </button>
 
           {aiAnalysis && (
@@ -683,30 +736,100 @@ export default function App() {
         </div>
       )}
 
-      {/* باقي التبويبات */}
+      {/* 📊 عمق السوق الحقيقي (Binance Live OrderBook) */}
       {activeTab === 'dom' && (
         <div style={styles.tabContentCard}>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#00f5d4', marginBottom: '10px' }}>📊 عمق السوق (DOM)</div>
-          <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '8px' }}>أوامر البيع الكبرى (Ask Walls):</div>
+          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#00f5d4', marginBottom: '10px' }}>📊 عمق السوق الحي (Binance OrderBook)</div>
+          <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '6px' }}>أوامر البيع الكبرى (Asks):</div>
           <div style={styles.domBoxRed}>
-            <div>${(currentPairObj.price * 1.002).toFixed(2)} — 14.2 BTC</div>
-            <div>${(currentPairObj.price * 1.001).toFixed(2)} — 8.5 BTC</div>
+            {orderBook.asks.map((ask, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>${ask[0]}</span>
+                <span>{ask[1]} الكمية</span>
+              </div>
+            ))}
           </div>
           <div style={{ textAlign: 'center', margin: '8px 0', fontSize: '13px', fontWeight: 'bold', color: '#fff' }}>
-            السعر الحالي: ${currentPairObj.price}
+            السعر المباشر: ${currentPairObj.price}
           </div>
-          <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '8px' }}>أوامر الشراء الكبرى (Bid Support):</div>
+          <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '6px' }}>أوامر الشراء الكبرى (Bids):</div>
           <div style={styles.domBoxGreen}>
-            <div>${(currentPairObj.price * 0.999).toFixed(2)} — 22.1 BTC</div>
-            <div>${(currentPairObj.price * 0.998).toFixed(2)} — 45.6 BTC</div>
+            {orderBook.bids.map((bid, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>${bid[0]}</span>
+                <span>{bid[1]} الكمية</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
+      {/* 🌐 مؤشر الخوف والطمع الحقيقي */}
+      {activeTab === 'sentiment' && (
+        <div style={styles.tabContentCard}>
+          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#3b82f6', marginBottom: '10px' }}>🌐 مؤشر معنويات السوق المباشر</div>
+          <div style={styles.propStatsGrid}>
+            <div style={styles.propStatItem}>
+              <span style={{ fontSize: '9px', color: '#94a3b8' }}>مؤشر الخوف والطمع</span>
+              <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#10b981', marginTop: '4px' }}>
+                {sentimentData.value} ({sentimentData.classification})
+              </span>
+            </div>
+            <div style={styles.propStatItem}>
+              <span style={{ fontSize: '9px', color: '#94a3b8' }}>المصدر</span>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#00f5d4', marginTop: '4px' }}>Alternative.me Live API</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📰 الأخبار الاقتصادية الحية */}
+      {activeTab === 'news' && (
+        <div style={styles.tabContentCard}>
+          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#eab308', marginBottom: '10px' }}>📰 بث الأخبار الاقتصادية المباشر</div>
+          {liveNews.length === 0 ? (
+            <div style={{ color: '#64748b', fontSize: '11px' }}>جاري تحميل الأخبار الحية...</div>
+          ) : (
+            liveNews.map(news => (
+              <div key={news.id} style={styles.newsItem}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#00f5d4' }}>{news.source}</span>
+                  <span style={{ fontSize: '9px', color: '#64748b' }}>{news.time}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#fff', lineHeight: '1.3' }}>{news.title}</div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* الصفقات المفتوحة */}
+      {activeTab === 'positions' && (
+        <div style={styles.tabContentCard}>
+          {positions.length === 0 ? (
+            <div style={{ textAlign: 'center', color: '#64748b', padding: '30px 0', fontSize: '12px' }}>لا توجد صفقات مفتوحة حالياً</div>
+          ) : (
+            positions.map(pos => (
+              <div key={pos.id} style={{ ...styles.posRow, borderRight: `4px solid ${pos.side === 'LONG' ? '#10b981' : '#ef4444'}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontWeight: 'bold', color: pos.side === 'LONG' ? '#10b981' : '#ef4444', fontSize: '12px' }}>
+                    {pos.symbolName} ({pos.side}) {pos.leverage > 1 ? `${pos.leverage}x` : ''}
+                  </span>
+                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: pos.pnl >= 0 ? '#10b981' : '#ef4444' }}>
+                    {pos.pnl >= 0 ? '+' : ''}${pos.pnl} USD
+                  </span>
+                </div>
+                <button style={styles.closePosBtn} onClick={() => handleClosePosition(pos.id, pos.pnl)}>إغلاق الصفقة</button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* باقي التبويبات التفاعلية */}
       {activeTab === 'battle' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ef4444', marginBottom: '10px' }}>⚔️ معارك PvP</div>
-          <p style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '12px' }}>ادخل معركة حية واربح جوائز بقيمة 1000$!</p>
           <button style={styles.battleStartBtn} onClick={startBattle}>🚀 ابدأ معركة التحدي</button>
           {battleOpponent && (
             <div style={styles.aiBox}>
@@ -733,47 +856,6 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === 'sentiment' && (
-        <div style={styles.tabContentCard}>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#3b82f6', marginBottom: '10px' }}>🌐 تحليل المشاعر</div>
-          <div style={styles.propStatsGrid}>
-            <div style={styles.propStatItem}>
-              <span style={{ fontSize: '9px', color: '#94a3b8' }}>الخوف والطمع</span>
-              <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981' }}>84 (طمع)</span>
-            </div>
-            <div style={styles.propStatItem}>
-              <span style={{ fontSize: '9px', color: '#94a3b8' }}>التوجه</span>
-              <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981' }}>74% صعود</span>
-            </div>
-            <div style={styles.propStatItem}>
-              <span style={{ fontSize: '9px', color: '#94a3b8' }}>صانع السوق</span>
-              <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#f59e0b' }}>امتصاص سيولة</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'learn' && (
-        <div style={styles.tabContentCard}>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#eab308', marginBottom: '10px' }}>🎓 أكاديمية التداول</div>
-          <div style={styles.signalCard}>
-            <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#fff', marginBottom: '6px' }}>سؤال: ما نسبة المخاطرة المثالية لكل صفقة؟</div>
-            {!quizAnswered ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
-                <button style={styles.quizOptBtn} onClick={() => { setQuizAnswered(true); setBalance(p => p + 400); setUserBadges(b => [...b, 'خبير إدارة مخاطر 🛡️']); }}>
-                  أ) من 1% إلى 2% 🟢
-                </button>
-                <button style={styles.quizOptBtn} onClick={() => setQuizAnswered(true)}>
-                  ب) 100% بروافع عالية 🔴
-                </button>
-              </div>
-            ) : (
-              <div style={{ color: '#10b981', fontWeight: 'bold', fontSize: '11px', marginTop: '6px' }}>✅ إجابة صحيحة! تم إضافة +400$!</div>
-            )}
-          </div>
-        </div>
-      )}
-
       {activeTab === 'copy' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#f59e0b', marginBottom: '10px' }}>👥 نسخ الصفقات</div>
@@ -794,48 +876,6 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === 'signals' && (
-        <div style={styles.tabContentCard}>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#00f5d4', marginBottom: '10px' }}>📡 توصيات القناة</div>
-          {channelSignals.map(sig => (
-            <div key={sig.id} style={styles.signalCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <span style={{ fontWeight: 'bold', color: sig.side === 'LONG' ? '#10b981' : '#ef4444' }}>{sig.pairName} ({sig.side})</span>
-                <span style={{ fontSize: '10px', color: '#64748b' }}>{sig.time}</span>
-              </div>
-              <button 
-                style={styles.applySignalBtn}
-                onClick={() => { setSelectedPair(sig.pairKey); setActiveTab('chart'); handleTrade(sig.side, { stopLoss: sig.sl, takeProfit: sig.tp }); }}
-              >
-                ⚡ تنفيذ التوصية
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {activeTab === 'positions' && (
-        <div style={styles.tabContentCard}>
-          {positions.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#64748b', padding: '30px 0', fontSize: '12px' }}>لا توجد صفقات مفتوحة حالياً</div>
-          ) : (
-            positions.map(pos => (
-              <div key={pos.id} style={{ ...styles.posRow, borderRight: `4px solid ${pos.side === 'LONG' ? '#10b981' : '#ef4444'}` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ fontWeight: 'bold', color: pos.side === 'LONG' ? '#10b981' : '#ef4444', fontSize: '12px' }}>
-                    {pos.symbolName} ({pos.side}) {pos.leverage > 1 ? `${pos.leverage}x` : ''}
-                  </span>
-                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: pos.pnl >= 0 ? '#10b981' : '#ef4444' }}>
-                    {pos.pnl >= 0 ? '+' : ''}${pos.pnl} USD
-                  </span>
-                </div>
-                <button style={styles.closePosBtn} onClick={() => handleClosePosition(pos.id, pos.pnl)}>إغلاق الصفقة</button>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
       {activeTab === 'calc' && (
         <div style={styles.tabContentCard}>
           <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#3b82f6', marginBottom: '12px' }}>🧮 حاسبة المخاطرة</div>
@@ -851,36 +891,6 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '11px', color: '#94a3b8' }}>العقد المقترح:</span>
               <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#00f5d4' }}>{calculatedLotSize} Lot</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'news' && (
-        <div style={styles.tabContentCard}>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#eab308', marginBottom: '10px' }}>📰 الأخبار الاقتصادية</div>
-          {economicNews.map(news => (
-            <div key={news.id} style={styles.newsItem}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff' }}>{news.title}</span>
-                <span style={{ fontSize: '9px', color: news.impact === 'HIGH' ? '#ef4444' : '#eab308' }}>{news.impact}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {activeTab === 'prop' && (
-        <div style={styles.tabContentCard}>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ec4899', marginBottom: '10px' }}>🏆 اختبار شركات التمويل</div>
-          <div style={styles.propStatsGrid}>
-            <div style={styles.propStatItem}>
-              <span style={{ fontSize: '9px', color: '#94a3b8' }}>الحد اليومي</span>
-              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#ef4444' }}>${propMaxDailyLoss}</span>
-            </div>
-            <div style={styles.propStatItem}>
-              <span style={{ fontSize: '9px', color: '#94a3b8' }}>الهدف المطلوب</span>
-              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#10b981' }}>${propTarget}</span>
             </div>
           </div>
         </div>
@@ -929,7 +939,6 @@ const styles = {
   applySignalBtn: { width: '100%', padding: '8px', backgroundColor: '#00f5d4', color: '#000', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' },
   battleStartBtn: { width: '100%', padding: '10px', backgroundColor: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' },
   vaultCard: { backgroundColor: 'rgba(9, 13, 22, 0.8)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '10px', padding: '12px', textAlign: 'center' },
-  quizOptBtn: { width: '100%', padding: '8px', backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '10px', textAlign: 'right', cursor: 'pointer' },
   domBoxRed: { backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', padding: '8px', fontSize: '11px', color: '#ef4444', marginBottom: '8px' },
   domBoxGreen: { backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', padding: '8px', fontSize: '11px', color: '#10b981' },
   posRow: { backgroundColor: 'rgba(9, 13, 22, 0.6)', padding: '10px', borderRadius: '8px', marginBottom: '8px' },
@@ -938,7 +947,7 @@ const styles = {
   aiBox: { backgroundColor: 'rgba(9, 13, 22, 0.8)', border: '1px solid rgba(114, 9, 183, 0.3)', borderRadius: '10px', padding: '10px', marginTop: '10px' },
   calcResultBox: { backgroundColor: 'rgba(9, 13, 22, 0.8)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '8px', padding: '10px', marginTop: '10px' },
   newsItem: { backgroundColor: 'rgba(9, 13, 22, 0.6)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '8px', padding: '8px', marginBottom: '8px' },
-  propStatsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' },
+  propStatsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' },
   propStatItem: { backgroundColor: 'rgba(9, 13, 22, 0.8)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '8px', padding: '8px', textAlign: 'center' },
   statusToast: { position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#00f5d4', color: '#000', padding: '8px 16px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,245,212,0.3)', zIndex: 100 }
 };
